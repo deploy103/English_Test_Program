@@ -19,9 +19,9 @@ while True:
 
 
 if choise == 1:
-    file_path = r"C:\Code\Word_Test\Lesson3_words.json"
+    file_path = r"C:\Code\Word_Test\Lesson3_words.json"       # Insert to Your Lesson3_words.json file Path 
 elif choise == 2:
-    file_path = r"C:\Code\Word_Test\Lesson4_words.json"
+    file_path = r"C:\Code\Word_Test\Lesson4_words.json"       # Insert to your Lesson4_word.json file Path
 
 
 try:
@@ -39,11 +39,11 @@ i = 0
 wordMemory = []
 
 
-display_time = 0.0011
+display_time = 6    # word stop time setting
 
 print("-----Start-----\n")
 
-for word in words[:40]:
+for word in words[:40]:    # word count adjustment
     word = {k.lower(): v for k, v in word.items()}
     shown = random.choice([word['english'], word['korean']])
     
