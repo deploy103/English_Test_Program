@@ -5,6 +5,7 @@ type TestMode = "ko" | "en" | "rand";
 interface WordbookSummary {
   id: string;
   name: string;
+  group: string;
   description: string;
   wordCount: number;
   source: "manual" | "upload";
@@ -49,7 +50,26 @@ interface ResultSummary {
   completedAt?: string;
 }
 
-type TabKey = "test" | "add" | "manage" | "answers";
+interface WordbookGroupSummary {
+  id: string;
+  name: string;
+  wordbookCount: number;
+  wordCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AddDraft {
+  uploadName: string;
+  uploadGroup: string;
+  uploadDescription: string;
+  manualName: string;
+  manualGroup: string;
+  manualDescription: string;
+  manualWords: string;
+}
+
+type TabKey = "test" | "add" | "groups" | "manage" | "answers";
 type ActivePhase = "countdown" | "running" | "done";
 
 interface ActiveTest {
@@ -58,6 +78,11 @@ interface ActiveTest {
   countdown: number;
   currentIndex: number;
   remainingMs: number;
+}
+
+interface WordbookGroup {
+  group: string;
+  books: WordbookSummary[];
 }
 
 const appRoot = document.querySelector<HTMLDivElement>("#app");
@@ -70,6 +95,7 @@ const app = appRoot;
 
 let tab: TabKey = "test";
 let wordbooks: WordbookSummary[] = [];
+let groups: WordbookGroupSummary[] = [];
 let results: ResultSummary[] = [];
 let selectedWordbookId = "";
 let selectedResult: TestResult | null = null;
@@ -77,6 +103,18 @@ let activeTest: ActiveTest | null = null;
 let timer: number | null = null;
 let toastMessage = "";
 let isBusy = false;
+let isSidebarOpen = false;
+
+const DEFAULT_GROUP_NAME = "기본 그룹";
+const addDraft: AddDraft = {
+  uploadName: "",
+  uploadGroup: "",
+  uploadDescription: "",
+  manualName: "",
+  manualGroup: DEFAULT_GROUP_NAME,
+  manualDescription: "",
+  manualWords: ""
+};
 
 void bootstrap();
 
@@ -86,13 +124,17 @@ async function bootstrap(): Promise<void> {
 }
 
 async function refreshAll(): Promise<void> {
-  const [bookList, resultList] = await Promise.all([
+  const [groupList, bookList, resultList] = await Promise.all([
+    api<WordbookGroupSummary[]>("/api/groups"),
     api<WordbookSummary[]>("/api/wordbooks"),
     api<ResultSummary[]>("/api/results")
   ]);
 
+  groups = groupList;
   wordbooks = bookList;
   results = resultList;
+
+  syncAddDraftGroups();
 
   if (!selectedWordbookId && wordbooks[0]) {
     selectedWordbookId = wordbooks[0].id;
@@ -106,8 +148,10 @@ async function refreshAll(): Promise<void> {
 function render(): void {
   const isTesting = Boolean(activeTest);
   app.innerHTML = `
-    <div class="app-shell ${isTesting ? "is-testing" : ""}">
+    <div class="app-shell ${isTesting ? "is-testing" : ""} ${isSidebarOpen ? "sidebar-open" : ""}">
+      ${isTesting ? "" : renderAppBar()}
       ${isTesting ? "" : renderSidebar()}
+      ${!isTesting && isSidebarOpen ? `<button class="sidebar-backdrop" id="sidebar-backdrop" type="button" aria-label="메뉴 닫기"></button>` : ""}
       <main class="main ${isTesting ? "test-main" : ""}">
         ${toastMessage ? `<div class="toast" role="status">${escapeHtml(toastMessage)}</div>` : ""}
         ${renderTopActions()}
@@ -119,6 +163,23 @@ function render(): void {
   bindEvents();
 }
 
+function renderAppBar(): string {
+  return `
+    <header class="app-bar">
+      <button class="icon-button menu-button" id="menu-button" type="button" aria-label="메뉴 열기" aria-expanded="${isSidebarOpen}">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <div class="app-title">
+        <strong>Word Test</strong>
+        <span>${tabLabel(tab)} · ${wordbooks.length}개 단어장</span>
+      </div>
+      <button class="ghost-button compact-home-button" id="home-button" type="button">홈</button>
+    </header>
+  `;
+}
+
 function renderSidebar(): string {
   return `
     <aside class="sidebar">
@@ -126,24 +187,26 @@ function renderSidebar(): string {
         <div class="brand-mark">WT</div>
         <div>
           <h1>Word Test</h1>
-          <p>${wordbooks.length}개 단어장</p>
+          <p>${groups.length}개 그룹 · ${wordbooks.length}개 단어장</p>
         </div>
+        <button class="icon-button close-button" id="close-menu-button" type="button" aria-label="메뉴 닫기">×</button>
       </div>
 
       <nav class="nav-tabs" aria-label="주요 메뉴">
         ${renderNavButton("test", "테스트")}
         ${renderNavButton("add", "추가")}
+        ${renderNavButton("groups", "그룹관리")}
         ${renderNavButton("manage", "관리")}
         ${renderNavButton("answers", "정답지")}
       </nav>
 
       <section class="side-section">
         <div class="side-heading">
-          <span>단어장</span>
+          <span>그룹별 단어장</span>
           <span>${totalWords()} words</span>
         </div>
         <div class="side-list">
-          ${wordbooks.length ? wordbooks.map(renderWordbookItem).join("") : `<div class="empty-note">단어장이 없습니다.</div>`}
+          ${wordbooks.length ? groupedWordbooks().map(renderSidebarGroup).join("") : `<div class="empty-note">단어장이 없습니다.</div>`}
         </div>
       </section>
     </aside>
@@ -151,9 +214,13 @@ function renderSidebar(): string {
 }
 
 function renderTopActions(): string {
+  if (!activeTest) {
+    return "";
+  }
+
   return `
     <div class="top-actions">
-      ${activeTest ? `<button class="ghost-button" id="stop-test-button" type="button">중단</button>` : ""}
+      <button class="ghost-button" id="stop-test-button" type="button">중단</button>
       <button class="ghost-button home-button" id="home-button" type="button">홈</button>
     </div>
   `;
@@ -173,12 +240,24 @@ function renderWordbookItem(book: WordbookSummary): string {
   `;
 }
 
+function renderSidebarGroup(section: WordbookGroup): string {
+  return `
+    <div class="side-group">
+      <div class="side-group-title">=== ${escapeHtml(section.group)} ===</div>
+      ${section.books.map(renderWordbookItem).join("")}
+    </div>
+  `;
+}
+
 function renderCurrentTab(): string {
   if (tab === "add") {
     return renderAddTab();
   }
   if (tab === "manage") {
     return renderManageTab();
+  }
+  if (tab === "groups") {
+    return renderGroupsTab();
   }
   if (tab === "answers") {
     return renderAnswersTab();
@@ -200,11 +279,16 @@ function renderTestTab(): string {
     <section class="work-grid">
       <form class="panel test-panel" id="start-form">
         <label class="field">
+          <span>단어장 선택</span>
+          <select name="wordbookId" id="wordbook-select" ${wordbooks.length ? "" : "disabled"}>
+            ${renderWordbookSelectOptions()}
+          </select>
+        </label>
+
+        <label class="field">
           <span>문제 개수</span>
           <select name="questionCount">
-            <option value="30">30개</option>
-            <option value="40">40개</option>
-            <option value="50">50개</option>
+            ${[10, 20, 30, 40, 50].map((count) => `<option value="${count}" ${count === 30 ? "selected" : ""}>${count}개</option>`).join("")}
           </select>
         </label>
 
@@ -218,9 +302,7 @@ function renderTestTab(): string {
         <label class="field">
           <span>표시 시간</span>
           <select name="displaySeconds">
-            <option value="3">3초</option>
-            <option value="5">5초</option>
-            <option value="6">6초</option>
+            ${range(3, 15).map((seconds) => `<option value="${seconds}" ${seconds === 5 ? "selected" : ""}>${seconds}초</option>`).join("")}
           </select>
         </label>
 
@@ -256,11 +338,12 @@ function renderModeOption(value: TestMode, label: string, checked = false): stri
 function renderBookDetail(book: WordbookSummary): string {
   return `
     <div class="book-detail">
-      <p class="eyebrow">${sourceLabel(book.source)}</p>
+      <p class="eyebrow">=== ${escapeHtml(book.group || DEFAULT_GROUP_NAME)} ===</p>
       <h3>${escapeHtml(book.name)}</h3>
       ${book.description ? `<p>${escapeHtml(book.description)}</p>` : ""}
       ${book.sourceFilename ? `<p class="muted">${escapeHtml(book.sourceFilename)}</p>` : ""}
       <dl>
+        <div><dt>유형</dt><dd>${sourceLabel(book.source)}</dd></div>
         <div><dt>생성</dt><dd>${formatDate(book.createdAt)}</dd></div>
         <div><dt>수정</dt><dd>${formatDate(book.updatedAt)}</dd></div>
       </dl>
@@ -275,6 +358,10 @@ function renderAddTab(): string {
         <p class="eyebrow">단어장 추가</p>
         <h2>서버 저장 단어장</h2>
       </div>
+      <div class="header-actions">
+        <button class="ghost-button" data-tab="groups" type="button">그룹관리</button>
+        <a class="ghost-button" href="/examples/wordbook-example.json" download>JSON 예시 다운로드</a>
+      </div>
     </section>
 
     <section class="add-grid">
@@ -282,12 +369,23 @@ function renderAddTab(): string {
         <h3>JSON 업로드</h3>
         <label class="field">
           <span>이름</span>
-          <input name="name" type="text" maxlength="80" required />
+          <input name="name" data-draft-field="uploadName" type="text" maxlength="80" value="${escapeAttribute(addDraft.uploadName)}" placeholder="비우면 JSON 또는 파일명 사용" />
+        </label>
+        <label class="field">
+          <span>그룹</span>
+          <select name="group" data-draft-field="uploadGroup">
+            <option value="" ${addDraft.uploadGroup ? "" : "selected"}>JSON 파일 값 사용</option>
+            ${renderGroupSelectOptions(addDraft.uploadGroup)}
+          </select>
         </label>
         <label class="field">
           <span>메모</span>
-          <input name="description" type="text" maxlength="500" />
+          <input name="description" data-draft-field="uploadDescription" type="text" maxlength="500" value="${escapeAttribute(addDraft.uploadDescription)}" />
         </label>
+        <div class="json-guide">
+          <strong>JSON 기준</strong>
+          <code>{ "group": "HS관련", "name": "2단원", "words": [{ "english": "apple", "korean": "사과" }] }</code>
+        </div>
         <label class="file-field">
           <input name="file" type="file" accept="application/json,.json" required />
           <span>JSON 파일 선택</span>
@@ -299,15 +397,21 @@ function renderAddTab(): string {
         <h3>직접 입력</h3>
         <label class="field">
           <span>이름</span>
-          <input name="name" type="text" maxlength="80" required />
+          <input name="name" data-draft-field="manualName" type="text" maxlength="80" value="${escapeAttribute(addDraft.manualName)}" required />
+        </label>
+        <label class="field">
+          <span>그룹</span>
+          <select name="group" data-draft-field="manualGroup">
+            ${renderGroupSelectOptions(addDraft.manualGroup)}
+          </select>
         </label>
         <label class="field">
           <span>메모</span>
-          <input name="description" type="text" maxlength="500" />
+          <input name="description" data-draft-field="manualDescription" type="text" maxlength="500" value="${escapeAttribute(addDraft.manualDescription)}" />
         </label>
         <label class="field textarea-field">
           <span>단어</span>
-          <textarea name="words" rows="12" spellcheck="false" placeholder="apple = 사과&#10;take place, 일어나다&#10;valid&#9;타당한"></textarea>
+          <textarea name="words" data-draft-field="manualWords" rows="12" spellcheck="false" placeholder="apple = 사과&#10;take place, 일어나다&#10;valid&#9;타당한">${escapeHtml(addDraft.manualWords)}</textarea>
         </label>
         <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>저장</button>
       </form>
@@ -333,16 +437,38 @@ function renderManageTab(): string {
             <span class="metric-label">단어장</span>
           </div>
           <div>
-            <span class="metric-value">${totalWords()}</span>
-            <span class="metric-label">단어</span>
+            <span class="metric-value">${groups.length}</span>
+            <span class="metric-label">그룹</span>
           </div>
         </div>
-        <button class="primary-button" data-tab="add" type="button">단어장 추가</button>
+        <div class="metric-row single-metric">
+          <div>
+            <span class="metric-value">${totalWords()}</span>
+            <span class="metric-label">총 단어</span>
+          </div>
+        </div>
+        <div class="stacked-actions">
+          <button class="primary-button" data-tab="add" type="button">단어장 추가</button>
+          <button class="ghost-button" data-tab="groups" type="button">그룹관리</button>
+        </div>
       </div>
 
       <div class="panel manage-list">
-        ${wordbooks.length ? wordbooks.map(renderManageItem).join("") : `<div class="empty-note">JSON 업로드나 직접 입력으로 새 단어장을 추가하세요.</div>`}
+        ${wordbooks.length ? groupedWordbooks().map(renderManageGroup).join("") : `<div class="empty-note">JSON 업로드나 직접 입력으로 새 단어장을 추가하세요.</div>`}
       </div>
+    </section>
+  `;
+}
+
+function renderManageGroup(section: WordbookGroup): string {
+  const wordCount = section.books.reduce((sum, book) => sum + book.wordCount, 0);
+  return `
+    <section class="manage-group">
+      <div class="group-heading">
+        <span>=== ${escapeHtml(section.group)} ===</span>
+        <small>${section.books.length}개 단어장 · ${wordCount}개 단어</small>
+      </div>
+      ${section.books.map(renderManageItem).join("")}
     </section>
   `;
 }
@@ -352,12 +478,60 @@ function renderManageItem(book: WordbookSummary): string {
     <article class="manage-item">
       <div>
         <h3>${escapeHtml(book.name)}</h3>
-        <p>${book.wordCount}개 · ${sourceLabel(book.source)} · ${formatDate(book.createdAt)}</p>
+        <p>${escapeHtml(book.group || DEFAULT_GROUP_NAME)} · ${book.wordCount}개 · ${sourceLabel(book.source)} · ${formatDate(book.createdAt)}</p>
         ${book.description ? `<p class="muted">${escapeHtml(book.description)}</p>` : ""}
       </div>
       <div class="manage-actions">
         <button class="ghost-button" data-use-wordbook-id="${book.id}" type="button">테스트</button>
         <button class="danger-button" data-delete-wordbook-id="${book.id}" type="button">삭제</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderGroupsTab(): string {
+  return `
+    <section class="page-header">
+      <div>
+        <p class="eyebrow">그룹관리</p>
+        <h2>${groups.length ? "단어장 그룹" : "그룹을 추가하세요"}</h2>
+      </div>
+      <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
+    </section>
+
+    <section class="groups-layout">
+      <form class="panel group-create-form" id="group-create-form">
+        <h3>새 그룹</h3>
+        <label class="field">
+          <span>그룹 이름</span>
+          <input name="name" type="text" maxlength="60" placeholder="예: HS관련" required />
+        </label>
+        <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>그룹 추가</button>
+      </form>
+
+      <div class="panel group-list">
+        ${groups.length ? groups.map(renderGroupManageItem).join("") : `<div class="empty-note">그룹을 먼저 만들면 단어장 추가 화면에서 선택할 수 있습니다.</div>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderGroupManageItem(group: WordbookGroupSummary): string {
+  const canDelete = group.name !== DEFAULT_GROUP_NAME;
+  return `
+    <article class="group-card">
+      <div class="group-card-main">
+        <form class="group-rename-form" data-rename-group-id="${group.id}">
+          <label>
+            <span>그룹 이름</span>
+            <input name="name" type="text" maxlength="60" value="${escapeAttribute(group.name)}" required />
+          </label>
+          <button class="ghost-button" type="submit">이름 변경</button>
+        </form>
+        <p>${group.wordbookCount}개 단어장 · ${group.wordCount}개 단어</p>
+      </div>
+      <div class="manage-actions">
+        <button class="danger-button" data-delete-group-id="${group.id}" type="button" ${canDelete ? "" : "disabled"}>삭제</button>
       </div>
     </article>
   `;
@@ -485,9 +659,25 @@ function renderActiveTest(): string {
 }
 
 function bindEvents(): void {
+  document.querySelector<HTMLButtonElement>("#menu-button")?.addEventListener("click", () => {
+    isSidebarOpen = !isSidebarOpen;
+    render();
+  });
+
+  document.querySelector<HTMLButtonElement>("#close-menu-button")?.addEventListener("click", () => {
+    isSidebarOpen = false;
+    render();
+  });
+
+  document.querySelector<HTMLButtonElement>("#sidebar-backdrop")?.addEventListener("click", () => {
+    isSidebarOpen = false;
+    render();
+  });
+
   document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       tab = button.dataset.tab as TabKey;
+      isSidebarOpen = false;
       clearToast();
       render();
     });
@@ -497,9 +687,16 @@ function bindEvents(): void {
     button.addEventListener("click", () => {
       selectedWordbookId = button.dataset.wordbookId ?? "";
       tab = "test";
+      isSidebarOpen = false;
       clearToast();
       render();
     });
+  });
+
+  document.querySelector<HTMLSelectElement>("#wordbook-select")?.addEventListener("change", (event) => {
+    selectedWordbookId = (event.currentTarget as HTMLSelectElement).value;
+    clearToast();
+    render();
   });
 
   document.querySelectorAll<HTMLButtonElement>("[data-result-id]").forEach((button) => {
@@ -513,6 +710,7 @@ function bindEvents(): void {
       selectedWordbookId = button.dataset.useWordbookId ?? "";
       selectedResult = null;
       tab = "test";
+      isSidebarOpen = false;
       clearToast();
       render();
     });
@@ -547,12 +745,40 @@ function bindEvents(): void {
     void saveManualWordbook(new FormData(event.currentTarget as HTMLFormElement));
   });
 
+  document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-draft-field]").forEach((field) => {
+    field.addEventListener("input", () => updateAddDraftField(field));
+    field.addEventListener("change", () => updateAddDraftField(field));
+  });
+
+  document.querySelector<HTMLFormElement>("#group-create-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void createGroupFromForm(new FormData(event.currentTarget as HTMLFormElement));
+  });
+
+  document.querySelectorAll<HTMLFormElement>("[data-rename-group-id]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void renameGroupFromForm(form.dataset.renameGroupId ?? "", new FormData(form));
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-delete-group-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void deleteGroupById(button.dataset.deleteGroupId ?? "");
+    });
+  });
+
   document.querySelector<HTMLButtonElement>("#refresh-button")?.addEventListener("click", () => {
     void refreshAndRender();
   });
 }
 
 async function beginTest(formData: FormData): Promise<void> {
+  const formWordbookId = String(formData.get("wordbookId") ?? "");
+  if (formWordbookId) {
+    selectedWordbookId = formWordbookId;
+  }
+
   if (!selectedWordbookId) {
     showToast("단어장을 선택하세요.");
     return;
@@ -581,6 +807,7 @@ async function uploadWordbook(formData: FormData): Promise<void> {
     });
     selectedWordbookId = created.id;
     tab = "test";
+    resetUploadDraft();
     showToast("단어장을 저장했습니다.");
     await refreshAll();
   });
@@ -599,13 +826,72 @@ async function saveManualWordbook(formData: FormData): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: String(formData.get("name") ?? ""),
+        group: String(formData.get("group") ?? ""),
         description: String(formData.get("description") ?? ""),
         words
       })
     });
     selectedWordbookId = created.id;
     tab = "test";
+    resetManualDraft();
     showToast("단어장을 저장했습니다.");
+    await refreshAll();
+  });
+}
+
+async function createGroupFromForm(formData: FormData): Promise<void> {
+  await withBusy(async () => {
+    const created = await api<WordbookGroupSummary>("/api/groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: String(formData.get("name") ?? "") })
+    });
+    addDraft.manualGroup = created.name;
+    showToast("그룹을 추가했습니다.");
+    await refreshAll();
+  });
+}
+
+async function renameGroupFromForm(id: string, formData: FormData): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  const group = groups.find((entry) => entry.id === id);
+  if (!group) {
+    return;
+  }
+
+  const nextName = String(formData.get("name") ?? "");
+  await withBusy(async () => {
+    const renamed = await api<WordbookGroupSummary>(`/api/groups/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: nextName })
+    });
+    updateDraftGroupName(group.name, renamed.name);
+    showToast("그룹 이름을 변경했습니다.");
+    await refreshAll();
+  });
+}
+
+async function deleteGroupById(id: string): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  const group = groups.find((entry) => entry.id === id);
+  const detail = group && group.wordbookCount > 0
+    ? `\n\n이 그룹의 단어장 ${group.wordbookCount}개도 같이 삭제됩니다.`
+    : "";
+  const confirmed = window.confirm(`${group?.name ?? "그룹"}을 삭제할까요?${detail}`);
+  if (!confirmed) {
+    return;
+  }
+
+  await withBusy(async () => {
+    await api<void>(`/api/groups/${id}`, { method: "DELETE" });
+    showToast("그룹을 삭제했습니다.");
     await refreshAll();
   });
 }
@@ -824,8 +1110,109 @@ function selectedWordbook(): WordbookSummary | undefined {
   return wordbooks.find((book) => book.id === selectedWordbookId);
 }
 
+function groupedWordbooks(): WordbookGroup[] {
+  const groups = new Map<string, WordbookSummary[]>();
+
+  for (const book of wordbooks) {
+    const group = normalizeGroupName(book.group);
+    groups.set(group, [...(groups.get(group) ?? []), book]);
+  }
+
+  return [...groups.entries()]
+    .map(([group, books]) => ({
+      group,
+      books: [...books].sort((a, b) => a.name.localeCompare(b.name, "ko-KR"))
+    }))
+    .sort((a, b) => {
+      if (a.group === DEFAULT_GROUP_NAME) {
+        return 1;
+      }
+      if (b.group === DEFAULT_GROUP_NAME) {
+        return -1;
+      }
+      return a.group.localeCompare(b.group, "ko-KR");
+    });
+}
+
+function renderWordbookSelectOptions(): string {
+  if (!wordbooks.length) {
+    return `<option value="">단어장이 없습니다</option>`;
+  }
+
+  return groupedWordbooks().map((section) => `
+    <optgroup label="=== ${escapeAttribute(section.group)} ===">
+      ${section.books.map((book) => `
+        <option value="${book.id}" ${book.id === selectedWordbookId ? "selected" : ""}>
+          ${escapeHtml(book.name)} (${book.wordCount}개)
+        </option>
+      `).join("")}
+    </optgroup>
+  `).join("");
+}
+
+function renderGroupSelectOptions(selectedGroup: string): string {
+  const availableGroups = groups.length
+    ? groups
+    : [{ id: DEFAULT_GROUP_NAME, name: DEFAULT_GROUP_NAME, wordbookCount: 0, wordCount: 0, createdAt: "", updatedAt: "" }];
+
+  return availableGroups.map((group) => `
+    <option value="${escapeAttribute(group.name)}" ${normalizeGroupName(selectedGroup) === normalizeGroupName(group.name) ? "selected" : ""}>
+      ${escapeHtml(group.name)}
+    </option>
+  `).join("");
+}
+
+function normalizeGroupName(value: string | undefined): string {
+  const group = (value ?? "").trim();
+  return group || DEFAULT_GROUP_NAME;
+}
+
+function updateAddDraftField(field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): void {
+  const key = field.dataset.draftField as keyof AddDraft | undefined;
+  if (!key) {
+    return;
+  }
+  addDraft[key] = field.value;
+}
+
+function syncAddDraftGroups(): void {
+  const names = new Set(groups.map((group) => group.name));
+  if (!addDraft.manualGroup || !names.has(addDraft.manualGroup)) {
+    addDraft.manualGroup = groups[0]?.name ?? DEFAULT_GROUP_NAME;
+  }
+  if (addDraft.uploadGroup && !names.has(addDraft.uploadGroup)) {
+    addDraft.uploadGroup = "";
+  }
+}
+
+function resetUploadDraft(): void {
+  addDraft.uploadName = "";
+  addDraft.uploadGroup = "";
+  addDraft.uploadDescription = "";
+}
+
+function resetManualDraft(): void {
+  addDraft.manualName = "";
+  addDraft.manualGroup = groups[0]?.name ?? DEFAULT_GROUP_NAME;
+  addDraft.manualDescription = "";
+  addDraft.manualWords = "";
+}
+
+function updateDraftGroupName(previousName: string, nextName: string): void {
+  if (addDraft.manualGroup === previousName) {
+    addDraft.manualGroup = nextName;
+  }
+  if (addDraft.uploadGroup === previousName) {
+    addDraft.uploadGroup = nextName;
+  }
+}
+
 function totalWords(): number {
   return wordbooks.reduce((sum, book) => sum + book.wordCount, 0);
+}
+
+function range(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
 }
 
 function sourceLabel(source: WordbookSummary["source"]): string {
@@ -843,6 +1230,22 @@ function modeLabel(mode: TestMode): string {
     return "영어";
   }
   return "랜덤";
+}
+
+function tabLabel(value: TabKey): string {
+  if (value === "add") {
+    return "추가";
+  }
+  if (value === "manage") {
+    return "관리";
+  }
+  if (value === "groups") {
+    return "그룹관리";
+  }
+  if (value === "answers") {
+    return "정답지";
+  }
+  return "테스트";
 }
 
 function formatDate(value: string): string {
@@ -886,4 +1289,8 @@ function escapeHtml(value: string): string {
     };
     return map[char];
   });
+}
+
+function escapeAttribute(value: string): string {
+  return escapeHtml(value);
 }

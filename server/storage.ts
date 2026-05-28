@@ -8,25 +8,43 @@ import type {
   TestMode,
   TestResult,
   WordEntry,
+  WordbookGroupRecord,
+  WordbookGroupSummary,
   WordbookRecord,
   WordbookSource,
   WordbookSummary
 } from "./types.js";
 
 const DEFAULT_DATA_DIR = path.resolve(process.cwd(), "data");
+const DEFAULT_GROUP_NAME = "기본 그룹";
 
 export const DATA_DIR = path.resolve(process.env.WORD_TEST_DATA_DIR || DEFAULT_DATA_DIR);
 export const WORDBOOK_DIR = path.join(DATA_DIR, "wordbooks");
+export const GROUP_DIR = path.join(DATA_DIR, "groups");
 export const RESULT_DIR = path.join(DATA_DIR, "results");
 export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 
 interface CreateWordbookInput {
   name: string;
+  group?: string;
   description?: string;
   words: WordEntry[];
   source: WordbookSource;
   sourceFilename?: string;
   uploadPath?: string;
+}
+
+interface UpdateWordbookInput {
+  name?: string;
+  group?: string;
+  description?: string;
+}
+
+interface LoadedWordbookJson {
+  name?: string;
+  group?: string;
+  description?: string;
+  words: WordEntry[];
 }
 
 interface StartTestInput {
@@ -56,6 +74,7 @@ export async function initializeStorage(): Promise<void> {
 export async function ensureDataDirs(): Promise<void> {
   await Promise.all([
     fs.mkdir(WORDBOOK_DIR, { recursive: true }),
+    fs.mkdir(GROUP_DIR, { recursive: true }),
     fs.mkdir(RESULT_DIR, { recursive: true }),
     fs.mkdir(UPLOAD_DIR, { recursive: true })
   ]);
@@ -95,6 +114,18 @@ export async function loadWordsFromJsonFile(filePath: string): Promise<WordEntry
   return normalizeWords(raw);
 }
 
+export async function loadWordbookFromJsonFile(filePath: string): Promise<LoadedWordbookJson> {
+  const raw = await readJson(filePath);
+  const record = isRecord(raw) ? raw : {};
+
+  return {
+    name: normalizeOptionalText(record.name ?? record.title),
+    group: normalizeOptionalText(record.group ?? record.groupName ?? record.category),
+    description: normalizeOptionalText(record.description ?? record.memo),
+    words: normalizeWords(raw)
+  };
+}
+
 export async function createWordbook(input: CreateWordbookInput): Promise<WordbookSummary> {
   const words = normalizeWords(input.words);
   if (words.length === 0) {
@@ -103,9 +134,13 @@ export async function createWordbook(input: CreateWordbookInput): Promise<Wordbo
 
   const name = normalizeName(input.name);
   const now = new Date().toISOString();
+  const group = normalizeGroup(input.group);
+  await ensureGroupByName(group);
+
   const record: WordbookRecord = {
     id: crypto.randomUUID(),
     name,
+    group,
     description: normalizeDescription(input.description),
     words,
     source: input.source,
@@ -120,14 +155,101 @@ export async function createWordbook(input: CreateWordbookInput): Promise<Wordbo
 }
 
 export async function listWordbooks(): Promise<WordbookSummary[]> {
+  await ensureGroupsForWordbooks();
   const records = await readRecords<WordbookRecord>(WORDBOOK_DIR);
   return records
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map(summarizeWordbook);
 }
 
+export async function listGroups(): Promise<WordbookGroupSummary[]> {
+  await ensureGroupsForWordbooks();
+  const [groups, wordbooks] = await Promise.all([
+    readRecords<WordbookGroupRecord>(GROUP_DIR),
+    readRecords<WordbookRecord>(WORDBOOK_DIR)
+  ]);
+  return summarizeGroups(groups, wordbooks);
+}
+
+export async function createGroup(name: string): Promise<WordbookGroupSummary> {
+  const normalized = normalizeGroup(name);
+  await ensureGroupsForWordbooks();
+  await assertUniqueGroupName(normalized);
+
+  const now = new Date().toISOString();
+  const record: WordbookGroupRecord = {
+    id: crypto.randomUUID(),
+    name: normalized,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  await writeJson(groupPath(record.id), record);
+  const groups = await listGroups();
+  return groups.find((group) => group.id === record.id) ?? summarizeGroups([record], [])[0];
+}
+
+export async function renameGroup(id: string, name: string): Promise<WordbookGroupSummary> {
+  const record = await getGroupRecord(id);
+  const previousName = normalizeGroup(record.name);
+  const nextName = normalizeGroup(name);
+
+  if (previousName !== nextName) {
+    await assertUniqueGroupName(nextName, id);
+    record.name = nextName;
+    record.updatedAt = new Date().toISOString();
+    await writeJson(groupPath(id), record);
+    await moveWordbooksToGroup(previousName, nextName);
+  }
+
+  const groups = await listGroups();
+  return groups.find((group) => group.id === id) ?? summarizeGroups([record], [])[0];
+}
+
+export async function deleteGroup(id: string): Promise<void> {
+  const record = await getGroupRecord(id);
+  const groupName = normalizeGroup(record.name);
+  const [wordbooks, groups] = await Promise.all([
+    readRecords<WordbookRecord>(WORDBOOK_DIR),
+    readRecords<WordbookGroupRecord>(GROUP_DIR)
+  ]);
+
+  if (groupName === DEFAULT_GROUP_NAME) {
+    badRequest("기본 그룹은 삭제할 수 없습니다.");
+  }
+
+  await Promise.all([
+    ...wordbooks
+      .filter((book) => normalizeGroup(book.group) === groupName)
+      .map((book) => fs.rm(wordbookPath(book.id), { force: true })),
+    ...groups
+      .filter((group) => normalizeGroup(group.name) === groupName)
+      .map((group) => fs.rm(groupPath(group.id), { force: true }))
+  ]);
+}
+
 export async function getWordbook(id: string): Promise<WordbookRecord> {
   return readRecord<WordbookRecord>(wordbookPath(id), "단어장을 찾을 수 없습니다.");
+}
+
+export async function updateWordbook(id: string, input: UpdateWordbookInput): Promise<WordbookSummary> {
+  const record = await getWordbook(id);
+
+  if (typeof input.name === "string") {
+    record.name = normalizeName(input.name);
+  }
+  if (typeof input.group === "string") {
+    record.group = normalizeGroup(input.group);
+  } else {
+    record.group = normalizeGroup(record.group);
+  }
+  if (typeof input.description === "string") {
+    record.description = normalizeDescription(input.description);
+  }
+
+  record.updatedAt = new Date().toISOString();
+  await writeJson(wordbookPath(id), record);
+  return summarizeWordbook(record);
 }
 
 export async function deleteWordbook(id: string): Promise<void> {
@@ -139,12 +261,12 @@ export async function startTest(input: StartTestInput): Promise<TestResult> {
     badRequest("출제 모드가 올바르지 않습니다.");
   }
 
-  if (!Number.isInteger(input.questionCount) || input.questionCount < 1 || input.questionCount > 300) {
-    badRequest("문제 개수는 1개 이상 300개 이하만 가능합니다.");
+  if (!Number.isInteger(input.questionCount) || input.questionCount < 10 || input.questionCount > 50) {
+    badRequest("문제 개수는 10개 이상 50개 이하만 가능합니다.");
   }
 
-  if (!Number.isInteger(input.displaySeconds) || input.displaySeconds < 1 || input.displaySeconds > 30) {
-    badRequest("표시 시간은 1초 이상 30초 이하만 가능합니다.");
+  if (!Number.isInteger(input.displaySeconds) || input.displaySeconds < 3 || input.displaySeconds > 15) {
+    badRequest("표시 시간은 3초 이상 15초 이하만 가능합니다.");
   }
 
   const wordbook = await getWordbook(input.wordbookId);
@@ -264,6 +386,7 @@ function summarizeWordbook(record: WordbookRecord): WordbookSummary {
   return {
     id: record.id,
     name: record.name,
+    group: normalizeGroup(record.group),
     description: record.description,
     wordCount: record.words.length,
     source: record.source,
@@ -312,6 +435,11 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
 function wordbookPath(id: string): string {
   assertSafeId(id);
   return path.join(WORDBOOK_DIR, `${id}.json`);
+}
+
+function groupPath(id: string): string {
+  assertSafeId(id);
+  return path.join(GROUP_DIR, `${id}.json`);
 }
 
 function resultPath(id: string): string {
@@ -383,6 +511,118 @@ function normalizeName(value: string): string {
 
 function normalizeDescription(value: string | undefined): string {
   return (value ?? "").trim().slice(0, 500);
+}
+
+function normalizeGroup(value: string | undefined): string {
+  const group = (value ?? "").trim();
+  if (!group) {
+    return DEFAULT_GROUP_NAME;
+  }
+  if (group.length > 60) {
+    badRequest("그룹 이름은 60자 이하로 입력하세요.");
+  }
+  return group;
+}
+
+async function ensureGroupsForWordbooks(): Promise<void> {
+  const wordbooks = await readRecords<WordbookRecord>(WORDBOOK_DIR);
+  const groups = new Set(wordbooks.map((book) => normalizeGroup(book.group)));
+  groups.add(DEFAULT_GROUP_NAME);
+
+  for (const group of groups) {
+    await ensureGroupByName(group);
+  }
+}
+
+async function ensureGroupByName(name: string): Promise<WordbookGroupRecord> {
+  const normalized = normalizeGroup(name);
+  const records = await readRecords<WordbookGroupRecord>(GROUP_DIR);
+  const existing = records.find((record) => normalizeGroup(record.name) === normalized);
+  if (existing) {
+    return existing;
+  }
+
+  const now = new Date().toISOString();
+  const record: WordbookGroupRecord = {
+    id: crypto.randomUUID(),
+    name: normalized,
+    createdAt: now,
+    updatedAt: now
+  };
+  await writeJson(groupPath(record.id), record);
+  return record;
+}
+
+async function getGroupRecord(id: string): Promise<WordbookGroupRecord> {
+  return readRecord<WordbookGroupRecord>(groupPath(id), "그룹을 찾을 수 없습니다.");
+}
+
+async function assertUniqueGroupName(name: string, exceptId?: string): Promise<void> {
+  const normalized = normalizeGroup(name);
+  const records = await readRecords<WordbookGroupRecord>(GROUP_DIR);
+  const duplicate = records.some((record) => record.id !== exceptId && normalizeGroup(record.name) === normalized);
+  if (duplicate) {
+    badRequest("이미 같은 이름의 그룹이 있습니다.");
+  }
+}
+
+async function moveWordbooksToGroup(previousName: string, nextName: string): Promise<void> {
+  const records = await readRecords<WordbookRecord>(WORDBOOK_DIR);
+  const now = new Date().toISOString();
+
+  await Promise.all(records.map(async (record) => {
+    if (normalizeGroup(record.group) !== previousName) {
+      return;
+    }
+
+    record.group = nextName;
+    record.updatedAt = now;
+    await writeJson(wordbookPath(record.id), record);
+  }));
+}
+
+function summarizeGroups(groups: WordbookGroupRecord[], wordbooks: WordbookRecord[]): WordbookGroupSummary[] {
+  const uniqueGroups = new Map<string, WordbookGroupRecord>();
+
+  for (const group of groups) {
+    const name = normalizeGroup(group.name);
+    const existing = uniqueGroups.get(name);
+    if (!existing || group.createdAt < existing.createdAt) {
+      uniqueGroups.set(name, group);
+    }
+  }
+
+  return [...uniqueGroups.values()]
+    .map((group) => {
+      const name = normalizeGroup(group.name);
+      const books = wordbooks.filter((book) => normalizeGroup(book.group) === name);
+
+      return {
+        id: group.id,
+        name,
+        wordbookCount: books.length,
+        wordCount: books.reduce((sum, book) => sum + book.words.length, 0),
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt
+      };
+    })
+    .sort((a, b) => {
+      if (a.name === DEFAULT_GROUP_NAME) {
+        return 1;
+      }
+      if (b.name === DEFAULT_GROUP_NAME) {
+        return -1;
+      }
+      return a.name.localeCompare(b.name, "ko-KR");
+    });
+}
+
+function normalizeOptionalText(value: unknown): string | undefined {
+  if (typeof value !== "string" && typeof value !== "number") {
+    return undefined;
+  }
+  const normalized = String(value).trim();
+  return normalized || undefined;
 }
 
 function normalizeCell(value: unknown): string {

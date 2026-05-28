@@ -7,7 +7,9 @@ import {
   HttpError,
   UPLOAD_DIR,
   contentTypeFor,
+  createGroup,
   createWordbook,
+  deleteGroup,
   deleteResult,
   deleteWordbook,
   extensionFor,
@@ -15,14 +17,17 @@ import {
   getResult,
   getWordbook,
   initializeStorage,
+  listGroups,
   listResults,
   listWordbooks,
-  loadWordsFromJsonFile,
+  loadWordbookFromJsonFile,
   markResultComplete,
+  renameGroup,
   normalizeWords,
   safeRemove,
   sanitizeDownloadName,
-  startTest
+  startTest,
+  updateWordbook
 } from "./storage.js";
 import type { AnswerFormat, TestMode, WordEntry } from "./types.js";
 
@@ -51,6 +56,25 @@ app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
 });
 
+app.get("/api/groups", asyncRoute(async (_request, response) => {
+  response.json(await listGroups());
+}));
+
+app.post("/api/groups", asyncRoute(async (request, response) => {
+  const body = request.body as { name?: string };
+  response.status(201).json(await createGroup(body.name ?? ""));
+}));
+
+app.patch("/api/groups/:id", asyncRoute(async (request, response) => {
+  const body = request.body as { name?: string };
+  response.json(await renameGroup(request.params.id, body.name ?? ""));
+}));
+
+app.delete("/api/groups/:id", asyncRoute(async (request, response) => {
+  await deleteGroup(request.params.id);
+  response.status(204).end();
+}));
+
 app.get("/api/wordbooks", asyncRoute(async (_request, response) => {
   response.json(await listWordbooks());
 }));
@@ -60,9 +84,10 @@ app.get("/api/wordbooks/:id", asyncRoute(async (request, response) => {
 }));
 
 app.post("/api/wordbooks/manual", asyncRoute(async (request, response) => {
-  const body = request.body as { name?: string; description?: string; words?: WordEntry[] };
+  const body = request.body as { name?: string; group?: string; description?: string; words?: WordEntry[] };
   const created = await createWordbook({
     name: body.name ?? "",
+    group: body.group,
     description: body.description,
     words: normalizeWords(body.words),
     source: "manual"
@@ -77,11 +102,15 @@ app.post("/api/wordbooks/upload", upload.single("file"), asyncRoute(async (reque
   }
 
   try {
-    const words = await loadWordsFromJsonFile(uploadedPath);
+    const parsed = await loadWordbookFromJsonFile(uploadedPath);
+    const submittedName = normalizeOptionalFormText(request.body.name);
+    const submittedGroup = normalizeOptionalFormText(request.body.group);
+    const submittedDescription = normalizeOptionalFormText(request.body.description);
     const created = await createWordbook({
-      name: String(request.body.name ?? path.parse(request.file.originalname).name),
-      description: typeof request.body.description === "string" ? request.body.description : undefined,
-      words,
+      name: submittedName ?? parsed.name ?? path.parse(request.file.originalname).name,
+      group: submittedGroup ?? parsed.group,
+      description: submittedDescription ?? parsed.description,
+      words: parsed.words,
       source: "upload",
       sourceFilename: request.file.originalname,
       uploadPath: path.relative(process.cwd(), uploadedPath)
@@ -91,6 +120,15 @@ app.post("/api/wordbooks/upload", upload.single("file"), asyncRoute(async (reque
     await safeRemove(uploadedPath);
     throw error;
   }
+}));
+
+app.patch("/api/wordbooks/:id", asyncRoute(async (request, response) => {
+  const body = request.body as { name?: string; group?: string; description?: string };
+  response.json(await updateWordbook(request.params.id, {
+    name: body.name,
+    group: body.group,
+    description: body.description
+  }));
 }));
 
 app.delete("/api/wordbooks/:id", asyncRoute(async (request, response) => {
@@ -193,4 +231,12 @@ function parseFormat(value: unknown): AnswerFormat {
     return value;
   }
   return "csv";
+}
+
+function normalizeOptionalFormText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized || undefined;
 }
