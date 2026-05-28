@@ -10,6 +10,7 @@ export interface WordEntry {
 export interface WordbookRecord {
   id: string;
   name: string;
+  group: string;
   description: string;
   words: WordEntry[];
   source: WordbookSource;
@@ -22,10 +23,27 @@ export interface WordbookRecord {
 export interface WordbookSummary {
   id: string;
   name: string;
+  group: string;
   description: string;
   wordCount: number;
   source: WordbookSource;
   sourceFilename?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WordbookGroupRecord {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WordbookGroupSummary {
+  id: string;
+  name: string;
+  wordbookCount: number;
+  wordCount: number;
   createdAt: string;
   updatedAt: string;
 }

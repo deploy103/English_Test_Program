@@ -1,0 +1,27 @@
+{
+  "group": "HS관련",
+  "name": "HS-2-1-기말-2단원",
+  "description": "영어 단어 테스트용 예시 단어장",
+  "words": [
+    {
+      "english": "possibility",
+      "korean": "가능성"
+    },
+    {
+      "english": "separate",
+      "korean": "별개의, 분리된"
+    },
+    {
+      "english": "incredibly",
+      "korean": "매우, 믿기 힘들 정도로"
+    },
+    {
+      "english": "be willing to",
+      "korean": "기꺼이 ~하다"
+    },
+    {
+      "english": "come up with",
+      "korean": "~을 생각해내다"
+    }
+  ]
+}
