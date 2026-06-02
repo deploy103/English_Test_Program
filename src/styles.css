@@ -768,9 +768,25 @@ a {
 .profile-panel,
 .password-panel,
 .management-panel,
-.admin-panel {
+.admin-panel,
+.session-panel {
   display: grid;
   gap: 14px;
+}
+
+.session-panel {
+  grid-column: 1 / -1;
+}
+
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-title-row h3 {
+  margin-bottom: 0;
 }
 
 .profile-list {
@@ -807,6 +823,67 @@ a {
 .management-actions {
   display: grid;
   gap: 8px;
+}
+
+.session-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.session-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid #edf1f3;
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, #f8fafc, #f7fee7);
+}
+
+.session-card.is-current {
+  border-color: #8ddab8;
+  background:
+    linear-gradient(135deg, #ecfdf5, #eff6ff);
+}
+
+.session-card div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.session-card strong,
+.session-card span,
+.session-card small {
+  overflow-wrap: anywhere;
+}
+
+.session-card strong {
+  color: #111827;
+  font-weight: 900;
+}
+
+.session-card span,
+.session-card small {
+  color: #66747f;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.status-pill {
+  display: inline-grid;
+  min-height: 30px;
+  place-items: center;
+  padding: 0 10px;
+  border: 1px solid #8ddab8;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #047857;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .search-form {
@@ -1158,6 +1235,16 @@ textarea:focus {
   margin: 0;
   color: #66747f;
   font-size: 13px;
+}
+
+.edit-wordbook-form {
+  align-items: stretch;
+}
+
+.edit-wordbook-fields {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(140px, 220px) minmax(180px, 1fr);
+  gap: 10px;
 }
 
 .group-rename-form {
@@ -1667,6 +1754,9 @@ textarea:focus {
   .manage-item,
   .group-card,
   .group-rename-form,
+  .edit-wordbook-fields,
+  .session-list,
+  .session-card,
   .admin-row {
     grid-template-columns: 1fr;
   }

@@ -121,6 +121,16 @@ interface AuditLogEntry {
   message?: string;
 }
 
+interface AuthSessionSummary {
+  id: string;
+  current: boolean;
+  createdAt: string;
+  expiresAt: string;
+  lastSeenAt: string;
+  userAgent?: string;
+  ipAddress?: string;
+}
+
 type AuthMode = "login" | "register";
 type TabKey = "test" | "memorize" | "add" | "mypage" | "groups" | "manage" | "answers";
 type PlayPageKey = "testPlay" | "memorizePlay";
@@ -189,6 +199,8 @@ let isAdminWordbookLoading = false;
 let isAdminLoading = false;
 let wordbookSearch = "";
 let answerSearch = "";
+let editingWordbookId = "";
+let authSessions: AuthSessionSummary[] = [];
 
 const DEFAULT_GROUP_NAME = "기본 그룹";
 const MEMORIZE_MIN_DISPLAY_SECONDS = 1;
@@ -247,15 +259,17 @@ async function refreshAll(): Promise<void> {
     return;
   }
 
-  const [groupList, bookList, resultList] = await Promise.all([
+  const [groupList, bookList, resultList, sessionList] = await Promise.all([
     api<WordbookGroupSummary[]>("/api/groups"),
     api<WordbookSummary[]>("/api/wordbooks"),
-    api<ResultSummary[]>("/api/results")
+    api<ResultSummary[]>("/api/results"),
+    api<AuthSessionSummary[]>("/api/auth/sessions")
   ]);
 
   groups = groupList;
   wordbooks = bookList;
   results = resultList;
+  authSessions = sessionList;
 
   if (currentUser.role === "admin") {
     await refreshAdminData();
@@ -770,9 +784,34 @@ function renderMyPageTab(): string {
           <button class="primary-button" data-tab="add" type="button">새 단어장</button>
         </div>
       </section>
+
+      <section class="panel session-panel">
+        <div class="panel-title-row">
+          <h3>로그인 세션</h3>
+          ${authSessions.some((session) => !session.current) ? `<button class="ghost-button mini-button" id="revoke-other-sessions" type="button">다른 기기 종료</button>` : ""}
+        </div>
+        <div class="session-list">
+          ${authSessions.length ? authSessions.map(renderAuthSession).join("") : `<div class="empty-note">세션 정보가 없습니다.</div>`}
+        </div>
+      </section>
     </section>
 
     ${user.role === "admin" ? renderAdminDashboard() : ""}
+  `;
+}
+
+function renderAuthSession(session: AuthSessionSummary): string {
+  return `
+    <article class="session-card ${session.current ? "is-current" : ""}">
+      <div>
+        <strong>${session.current ? "현재 로그인" : sessionDeviceLabel(session.userAgent)}</strong>
+        <span>${session.ipAddress ? escapeHtml(session.ipAddress) : "IP 없음"} · 최근 ${formatDate(session.lastSeenAt)}</span>
+        <small>만료 ${formatDate(session.expiresAt)}</small>
+      </div>
+      ${session.current
+        ? `<span class="status-pill">현재</span>`
+        : `<button class="danger-button mini-button" data-revoke-session-id="${session.id}" type="button">종료</button>`}
+    </article>
   `;
 }
 
@@ -963,6 +1002,10 @@ function renderManageGroup(section: WordbookGroup): string {
 }
 
 function renderManageItem(book: WordbookSummary): string {
+  if (editingWordbookId === book.id) {
+    return renderWordbookEditForm(book);
+  }
+
   return `
     <article class="manage-item">
       <div>
@@ -972,9 +1015,38 @@ function renderManageItem(book: WordbookSummary): string {
       </div>
       <div class="manage-actions">
         <button class="ghost-button" data-use-wordbook-id="${book.id}" type="button">퀴즈</button>
+        <button class="ghost-button" data-memorize-wordbook-id="${book.id}" type="button">암기</button>
+        <button class="ghost-button" data-edit-wordbook-id="${book.id}" type="button">편집</button>
         <button class="danger-button" data-delete-wordbook-id="${book.id}" type="button">삭제</button>
       </div>
     </article>
+  `;
+}
+
+function renderWordbookEditForm(book: WordbookSummary): string {
+  return `
+    <form class="manage-item edit-wordbook-form" data-edit-wordbook-form="${book.id}">
+      <div class="edit-wordbook-fields">
+        <label class="field">
+          <span>이름</span>
+          <input name="name" type="text" maxlength="80" value="${escapeAttribute(book.name)}" required />
+        </label>
+        <label class="field">
+          <span>그룹</span>
+          <select name="group">
+            ${renderGroupSelectOptions(book.group)}
+          </select>
+        </label>
+        <label class="field">
+          <span>메모</span>
+          <input name="description" type="text" maxlength="500" value="${escapeAttribute(book.description)}" />
+        </label>
+      </div>
+      <div class="manage-actions">
+        <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>저장</button>
+        <button class="ghost-button" data-cancel-edit-wordbook type="button">취소</button>
+      </div>
+    </form>
   `;
 }
 
@@ -1319,9 +1391,45 @@ function bindEvents(): void {
       selectedWordbookId = button.dataset.useWordbookId ?? "";
       selectedResult = null;
       selectedResultId = "";
+      editingWordbookId = "";
       isSidebarOpen = false;
       clearToast();
       navigateToTab("test");
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-memorize-wordbook-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedWordbookId = button.dataset.memorizeWordbookId ?? "";
+      selectedResult = null;
+      selectedResultId = "";
+      editingWordbookId = "";
+      isSidebarOpen = false;
+      clearToast();
+      navigateToTab("memorize");
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-edit-wordbook-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      editingWordbookId = button.dataset.editWordbookId ?? "";
+      clearToast();
+      render();
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-cancel-edit-wordbook]").forEach((button) => {
+    button.addEventListener("click", () => {
+      editingWordbookId = "";
+      clearToast();
+      render();
+    });
+  });
+
+  document.querySelectorAll<HTMLFormElement>("[data-edit-wordbook-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void updateWordbookFromForm(form.dataset.editWordbookForm ?? "", new FormData(form));
     });
   });
 
@@ -1427,6 +1535,16 @@ function bindEvents(): void {
   document.querySelector<HTMLFormElement>("#password-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void changePasswordFromForm(new FormData(event.currentTarget as HTMLFormElement));
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-revoke-session-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void revokeSessionById(button.dataset.revokeSessionId ?? "");
+    });
+  });
+
+  document.querySelector<HTMLButtonElement>("#revoke-other-sessions")?.addEventListener("click", () => {
+    void revokeOtherSessions();
   });
 
   document.querySelectorAll<HTMLButtonElement>("[data-admin-wordbook-id]").forEach((button) => {
@@ -1540,6 +1658,7 @@ async function changePasswordFromForm(formData: FormData): Promise<void> {
       })
     });
     showToast("비밀번호를 변경했습니다.");
+    await refreshAll();
   });
 }
 
@@ -1549,18 +1668,21 @@ async function refreshAdminData(): Promise<void> {
   }
 
   isAdminLoading = true;
-  const [users, wordbookList, logs] = await Promise.all([
-    api<AdminUserSummary[]>("/api/admin/users"),
-    api<AdminWordbookSummary[]>("/api/admin/wordbooks"),
-    api<AuditLogEntry[]>("/api/admin/logs")
-  ]);
-  adminUsers = users;
-  adminWordbooks = wordbookList;
-  adminLogs = logs;
-  if (selectedAdminWordbook && !adminWordbooks.some((book) => book.id === selectedAdminWordbook?.id)) {
-    selectedAdminWordbook = null;
+  try {
+    const [users, wordbookList, logs] = await Promise.all([
+      api<AdminUserSummary[]>("/api/admin/users"),
+      api<AdminWordbookSummary[]>("/api/admin/wordbooks"),
+      api<AuditLogEntry[]>("/api/admin/logs")
+    ]);
+    adminUsers = users;
+    adminWordbooks = wordbookList;
+    adminLogs = logs;
+    if (selectedAdminWordbook && !adminWordbooks.some((book) => book.id === selectedAdminWordbook?.id)) {
+      selectedAdminWordbook = null;
+    }
+  } finally {
+    isAdminLoading = false;
   }
-  isAdminLoading = false;
 }
 
 async function loadAdminWordbookDetail(id: string): Promise<void> {
@@ -1599,6 +1721,8 @@ function resetAuthenticatedState(): void {
   activeMemorize = null;
   wordbookSearch = "";
   answerSearch = "";
+  editingWordbookId = "";
+  authSessions = [];
   clearTimer();
 }
 
@@ -1809,7 +1933,63 @@ async function deleteWordbookById(id: string): Promise<void> {
     if (selectedWordbookId === id) {
       selectedWordbookId = "";
     }
+    if (editingWordbookId === id) {
+      editingWordbookId = "";
+    }
     showToast("단어장을 삭제했습니다.");
+    await refreshAll();
+  });
+}
+
+async function updateWordbookFromForm(id: string, formData: FormData): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  await withBusy(async () => {
+    const updated = await api<WordbookSummary>(`/api/wordbooks/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: String(formData.get("name") ?? ""),
+        group: String(formData.get("group") ?? ""),
+        description: String(formData.get("description") ?? "")
+      })
+    });
+    selectedWordbookId = updated.id;
+    editingWordbookId = "";
+    showToast("단어장을 수정했습니다.");
+    await refreshAll();
+  });
+}
+
+async function revokeSessionById(id: string): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  const session = authSessions.find((entry) => entry.id === id);
+  const confirmed = window.confirm(`${sessionDeviceLabel(session?.userAgent)} 세션을 종료할까요?`);
+  if (!confirmed) {
+    return;
+  }
+
+  await withBusy(async () => {
+    await api<void>(`/api/auth/sessions/${id}`, { method: "DELETE" });
+    showToast("세션을 종료했습니다.");
+    await refreshAll();
+  });
+}
+
+async function revokeOtherSessions(): Promise<void> {
+  const confirmed = window.confirm("현재 로그인 외의 모든 세션을 종료할까요?");
+  if (!confirmed) {
+    return;
+  }
+
+  await withBusy(async () => {
+    await api<void>("/api/auth/sessions/revoke-others", { method: "POST" });
+    showToast("다른 기기 로그인을 종료했습니다.");
     await refreshAll();
   });
 }
@@ -2478,6 +2658,35 @@ function modeLabel(mode: TestMode): string {
     return "영어";
   }
   return "랜덤";
+}
+
+function sessionDeviceLabel(userAgent: string | undefined): string {
+  if (!userAgent) {
+    return "알 수 없는 기기";
+  }
+
+  const lower = userAgent.toLowerCase();
+  const browser = lower.includes("edg/")
+    ? "Edge"
+    : lower.includes("chrome/")
+      ? "Chrome"
+      : lower.includes("firefox/")
+        ? "Firefox"
+        : lower.includes("safari/")
+          ? "Safari"
+          : "브라우저";
+  const platform = lower.includes("windows")
+    ? "Windows"
+    : lower.includes("android")
+      ? "Android"
+      : lower.includes("iphone") || lower.includes("ipad")
+        ? "iOS"
+        : lower.includes("mac os")
+          ? "macOS"
+          : lower.includes("linux")
+            ? "Linux"
+            : "기기";
+  return `${browser} · ${platform}`;
 }
 
 function answerDetailPath(id: string): string {

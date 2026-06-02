@@ -13,12 +13,14 @@ import {
   getUserMapByIds,
   initializeAuthStorage,
   listAuditLogs,
+  listUserSessions,
   listUsers,
   loginUser,
   publicUser,
   registerUser,
   requestMetaFrom,
   revokeOtherUserSessions,
+  revokeUserSession,
   rotateCsrfToken,
   usersExist,
   verifyCsrfToken
@@ -174,6 +176,26 @@ app.post("/api/auth/password", asyncRoute(async (request, response) => {
     requestMetaFrom(request)
   );
   await revokeOtherUserSessions(authOf(request).user.id, authOf(request).session.id);
+  response.status(204).end();
+}));
+
+app.get("/api/auth/sessions", asyncRoute(async (request, response) => {
+  response.json(await listUserSessions(authOf(request).user.id, authOf(request).session.id));
+}));
+
+app.post("/api/auth/sessions/revoke-others", asyncRoute(async (request, response) => {
+  await revokeOtherUserSessions(authOf(request).user.id, authOf(request).session.id);
+  await appendAuditLog(auditFrom(request, "auth.session_revoke_others", "success", "other sessions revoked"));
+  response.status(204).end();
+}));
+
+app.delete("/api/auth/sessions/:id", asyncRoute(async (request, response) => {
+  await revokeUserSession(
+    authOf(request).user,
+    authOf(request).session,
+    request.params.id,
+    requestMetaFrom(request)
+  );
   response.status(204).end();
 }));
 

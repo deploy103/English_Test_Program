@@ -50,6 +50,16 @@ export interface SessionRecord {
   ipAddress?: string;
 }
 
+export interface SessionSummary {
+  id: string;
+  current: boolean;
+  createdAt: string;
+  expiresAt: string;
+  lastSeenAt: string;
+  userAgent?: string;
+  ipAddress?: string;
+}
+
 export interface AuditLogEntry {
   id: string;
   createdAt: string;
