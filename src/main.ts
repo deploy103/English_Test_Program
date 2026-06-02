@@ -154,7 +154,7 @@ type AuthMode = "login" | "register";
 type TabKey = "home" | "test" | "memorize" | "add" | "settings" | "groups" | "manage" | "answers" | "admin";
 type PlayPageKey = "testPlay" | "memorizePlay";
 type PageKey = TabKey | PlayPageKey | "answerDetail";
-type ActivePhase = "countdown" | "running" | "done";
+type ActivePhase = "countdown" | "prompt" | "writing" | "done";
 type MemorizeDisplayMode = "en" | "ko" | "both";
 type MemorizePhase = "prompt" | "answer" | "done";
 type ColorMode = "light" | "dark";
@@ -235,6 +235,8 @@ const MEMORIZE_MAX_DISPLAY_SECONDS = 10;
 const MEMORIZE_DEFAULT_DISPLAY_SECONDS = 3;
 const MEMORIZE_ANSWER_SECONDS = 3;
 const MEMORIZE_ANSWER_MS = MEMORIZE_ANSWER_SECONDS * 1000;
+const TEST_WRITING_SECONDS = 3;
+const TEST_WRITING_MS = TEST_WRITING_SECONDS * 1000;
 const TAB_ROUTES: Record<TabKey, string> = {
   home: "/home",
   test: "/test",
@@ -784,8 +786,8 @@ function renderTestTab(): string {
             <span class="metric-label">단어</span>
           </div>
           <div>
-            <span class="metric-value">${results.length}</span>
-            <span class="metric-label">학습 기록</span>
+            <span class="metric-value">${TEST_WRITING_SECONDS}</span>
+            <span class="metric-label">쓰기 시간 초</span>
           </div>
         </div>
         ${selected ? renderBookDetail(selected) : `<div class="empty-note">단어장을 새로 추가하세요.</div>`}
@@ -1595,11 +1597,13 @@ function renderActiveTest(): string {
   const entry = activeTest.result.answers[activeTest.currentIndex];
   const progress = `${entry.index} / ${activeTest.result.questionCount}`;
   const progressPercent = Math.round((entry.index / activeTest.result.questionCount) * 100);
-  const timePercent = Math.max(0, Math.min(100, (activeTest.remainingMs / (activeTest.result.displaySeconds * 1000)) * 100));
+  const isWritingPhase = activeTest.phase === "writing";
+  const phaseDurationMs = isWritingPhase ? TEST_WRITING_MS : activeTest.result.displaySeconds * 1000;
+  const timePercent = Math.max(0, Math.min(100, (activeTest.remainingMs / phaseDurationMs) * 100));
   const secondsLeft = Math.ceil(activeTest.remainingMs / 1000);
 
   return `
-    <section class="test-stage">
+    <section class="test-stage ${isWritingPhase ? "is-writing" : ""}">
       <div class="stage-top">
         <span>${progress}</span>
         <span data-time-left>${secondsLeft}s</span>
@@ -1608,7 +1612,7 @@ function renderActiveTest(): string {
         <progress value="${progressPercent}" max="100"></progress>
       </div>
       <div class="stage-center">
-        <div class="prompt-word">${escapeHtml(entry.prompt)}</div>
+        ${isWritingPhase ? `<div class="writing-blank" aria-label="쓰기 시간"></div>` : `<div class="prompt-word">${escapeHtml(entry.prompt)}</div>`}
       </div>
       <div class="time-gauge" aria-label="남은 시간">
         <progress data-time-progress value="${timePercent}" max="100"></progress>
@@ -2565,12 +2569,34 @@ function showQuestion(index: number): void {
   }
 
   clearTimer();
-  activeTest.phase = "running";
+  activeTest.phase = "prompt";
   activeTest.currentIndex = index;
   activeTest.remainingMs = activeTest.result.displaySeconds * 1000;
   render();
 
-  const endAt = Date.now() + activeTest.result.displaySeconds * 1000;
+  runActiveTestTimer(activeTest.remainingMs, () => {
+    showWritingTime(index);
+  });
+}
+
+function showWritingTime(index: number): void {
+  if (!activeTest) {
+    return;
+  }
+
+  clearTimer();
+  activeTest.phase = "writing";
+  activeTest.currentIndex = index;
+  activeTest.remainingMs = TEST_WRITING_MS;
+  render();
+
+  runActiveTestTimer(TEST_WRITING_MS, () => {
+    showQuestion(index + 1);
+  });
+}
+
+function runActiveTestTimer(durationMs: number, onDone: () => void): void {
+  const endAt = Date.now() + durationMs;
   timer = window.setInterval(() => {
     if (!activeTest) {
       clearTimer();
@@ -2580,11 +2606,11 @@ function showQuestion(index: number): void {
     activeTest.remainingMs = Math.max(0, endAt - Date.now());
     if (activeTest.remainingMs <= 0) {
       clearTimer();
-      showQuestion(index + 1);
+      onDone();
       return;
     }
 
-    updateActiveTimerView(activeTest.remainingMs, activeTest.result.displaySeconds * 1000);
+    updateActiveTimerView(activeTest.remainingMs, durationMs);
   }, 100);
 }
 
