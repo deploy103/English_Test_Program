@@ -123,7 +123,8 @@ interface AuditLogEntry {
 
 type AuthMode = "login" | "register";
 type TabKey = "test" | "memorize" | "add" | "mypage" | "groups" | "manage" | "answers";
-type PageKey = TabKey | "answerDetail";
+type PlayPageKey = "testPlay" | "memorizePlay";
+type PageKey = TabKey | PlayPageKey | "answerDetail";
 type ActivePhase = "countdown" | "running" | "done";
 type MemorizeDisplayMode = "en" | "ko" | "both";
 type MemorizePhase = "prompt" | "answer" | "done";
@@ -201,6 +202,10 @@ const TAB_ROUTES: Record<TabKey, string> = {
   groups: "/groups",
   manage: "/wordbooks",
   answers: "/answers"
+};
+const PLAY_ROUTES: Record<PlayPageKey, string> = {
+  testPlay: "/test/play",
+  memorizePlay: "/memorize/play"
 };
 
 const addDraft: AddDraft = {
@@ -1765,7 +1770,7 @@ async function goHome(): Promise<void> {
     if (!confirmed) {
       return;
     }
-    abortActiveMemorize();
+    abortActiveMemorize("test");
     return;
   }
 
@@ -1784,6 +1789,7 @@ function startCountdown(result: TestResult): void {
     currentIndex: -1,
     remainingMs: result.displaySeconds * 1000
   };
+  navigateToPath(PLAY_ROUTES.testPlay);
   render();
   timer = window.setInterval(() => {
     if (!activeTest) {
@@ -1853,10 +1859,10 @@ async function finishActiveTest(): Promise<void> {
   activeTest = null;
   showToast("정답지를 저장했습니다.");
   await refreshAll();
-  navigateToAnswerDetail(completed.id);
+  navigateToAnswerDetail(completed.id, true);
 }
 
-async function abortActiveTest(): Promise<void> {
+async function abortActiveTest(nextTab: TabKey = "test", replace = true): Promise<void> {
   if (!activeTest) {
     return;
   }
@@ -1865,9 +1871,10 @@ async function abortActiveTest(): Promise<void> {
   clearTimer();
   activeTest = null;
   showToast("테스트를 중단했습니다.");
+  render();
   await api<void>(`/api/results/${resultId}`, { method: "DELETE" }).catch(() => undefined);
   await refreshAll();
-  navigateToTab("test", true);
+  navigateToTab(nextTab, replace);
 }
 
 function startMemorize(input: Omit<ActiveMemorize, "phase" | "currentIndex" | "remainingMs">): void {
@@ -1879,6 +1886,7 @@ function startMemorize(input: Omit<ActiveMemorize, "phase" | "currentIndex" | "r
     currentIndex: 0,
     remainingMs: input.displaySeconds * 1000
   };
+  navigateToPath(PLAY_ROUTES.memorizePlay);
   render();
   scheduleMemorizePrompt(0);
 }
@@ -1956,7 +1964,7 @@ function finishActiveMemorize(): void {
   }, 1200);
 }
 
-function abortActiveMemorize(): void {
+function abortActiveMemorize(nextTab: TabKey = "memorize", replace = true): void {
   if (!activeMemorize) {
     return;
   }
@@ -1964,7 +1972,7 @@ function abortActiveMemorize(): void {
   clearTimer();
   activeMemorize = null;
   showToast("암기를 중단했습니다.");
-  navigateToTab("memorize", true);
+  navigateToTab(nextTab, replace);
 }
 
 function navigateToTab(nextTab: TabKey, replace = false): void {
@@ -1991,11 +1999,46 @@ function navigateToPath(path: string, replace = false): void {
 
 async function handleLocationChange(): Promise<void> {
   applyRouteFromLocation();
+  if (await syncActiveSessionWithRoute()) {
+    return;
+  }
   await syncPageData();
+}
+
+async function syncActiveSessionWithRoute(): Promise<boolean> {
+  if (activeTest && page !== "testPlay") {
+    await abortActiveTest("test", true);
+    return true;
+  }
+
+  if (activeMemorize && page !== "memorizePlay") {
+    abortActiveMemorize("memorize", true);
+    return true;
+  }
+
+  return false;
 }
 
 async function syncPageData(): Promise<void> {
   isSidebarOpen = false;
+
+  if (page === "testPlay") {
+    if (activeTest) {
+      render();
+    } else {
+      navigateToTab("test", true);
+    }
+    return;
+  }
+
+  if (page === "memorizePlay") {
+    if (activeMemorize) {
+      render();
+    } else {
+      navigateToTab("memorize", true);
+    }
+    return;
+  }
 
   if (page === "answerDetail") {
     if (!selectedResultId) {
@@ -2034,8 +2077,14 @@ function applyRouteFromLocation(): void {
 function parseRoute(pathname: string): { page: PageKey; resultId?: string } {
   const segments = pathname.split("/").filter(Boolean).map(safeDecodePathSegment);
 
+  if (segments[0] === "test" && segments[1] === "play") {
+    return { page: "testPlay" };
+  }
   if (segments.length === 0 || segments[0] === "test") {
     return { page: "test" };
+  }
+  if (segments[0] === "memorize" && segments[1] === "play") {
+    return { page: "memorizePlay" };
   }
   if (segments[0] === "memorize") {
     return { page: "memorize" };
@@ -2342,12 +2391,27 @@ function answerDetailPath(id: string): string {
 }
 
 function tabForPage(value: PageKey): TabKey {
-  return value === "answerDetail" ? "answers" : value;
+  if (value === "answerDetail") {
+    return "answers";
+  }
+  if (value === "testPlay") {
+    return "test";
+  }
+  if (value === "memorizePlay") {
+    return "memorize";
+  }
+  return value;
 }
 
 function pageLabel(value: PageKey): string {
   if (value === "answerDetail") {
     return "정답지 상세";
+  }
+  if (value === "testPlay") {
+    return "테스트 진행";
+  }
+  if (value === "memorizePlay") {
+    return "암기 진행";
   }
   return tabLabel(tabForPage(value));
 }
