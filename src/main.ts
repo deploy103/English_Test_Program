@@ -187,6 +187,8 @@ let adminLogs: AuditLogEntry[] = [];
 let selectedAdminWordbook: AdminWordbookDetail | null = null;
 let isAdminWordbookLoading = false;
 let isAdminLoading = false;
+let wordbookSearch = "";
+let answerSearch = "";
 
 const DEFAULT_GROUP_NAME = "기본 그룹";
 const MEMORIZE_MIN_DISPLAY_SECONDS = 1;
@@ -472,7 +474,7 @@ function renderWordbookItem(book: WordbookSummary): string {
 function renderSidebarGroup(section: WordbookGroup): string {
   return `
     <div class="side-group">
-      <div class="side-group-title">=== ${escapeHtml(section.group)} ===</div>
+      <div class="side-group-title">${escapeHtml(section.group)}</div>
       ${section.books.map(renderWordbookItem).join("")}
     </div>
   `;
@@ -639,7 +641,7 @@ function renderModeOption(value: TestMode, label: string, checked = false): stri
 function renderBookDetail(book: WordbookSummary): string {
   return `
     <div class="book-detail">
-      <p class="eyebrow">=== ${escapeHtml(book.group || DEFAULT_GROUP_NAME)} ===</p>
+      <p class="eyebrow">${escapeHtml(book.group || DEFAULT_GROUP_NAME)}</p>
       <h3>${escapeHtml(book.name)}</h3>
       ${book.description ? `<p>${escapeHtml(book.description)}</p>` : ""}
       ${book.sourceFilename ? `<p class="muted">${escapeHtml(book.sourceFilename)}</p>` : ""}
@@ -891,6 +893,10 @@ function renderAuditLog(log: AuditLogEntry): string {
 }
 
 function renderManageTab(): string {
+  const visibleWordbooks = filteredWordbooks();
+  const visibleGroups = groupedWordbooks(visibleWordbooks);
+  const hasSearch = Boolean(wordbookSearch.trim());
+
   return `
     <section class="page-header">
       <div>
@@ -902,10 +908,20 @@ function renderManageTab(): string {
 
     <section class="manage-layout">
       <div class="panel manage-summary">
+        <form class="search-form" id="wordbook-search-form">
+          <label class="field search-field">
+            <span>단어장 검색</span>
+            <input name="query" type="search" maxlength="120" value="${escapeAttribute(wordbookSearch)}" placeholder="이름, 그룹, 메모" />
+          </label>
+          <div class="search-actions">
+            <button class="primary-button mini-button" type="submit">검색</button>
+            ${hasSearch ? `<button class="ghost-button mini-button" id="clear-wordbook-search" type="button">초기화</button>` : ""}
+          </div>
+        </form>
         <div class="metric-row">
           <div>
-            <span class="metric-value">${wordbooks.length}</span>
-            <span class="metric-label">단어장</span>
+            <span class="metric-value">${hasSearch ? visibleWordbooks.length : wordbooks.length}</span>
+            <span class="metric-label">${hasSearch ? "검색 결과" : "단어장"}</span>
           </div>
           <div>
             <span class="metric-value">${groups.length}</span>
@@ -925,7 +941,9 @@ function renderManageTab(): string {
       </div>
 
       <div class="panel manage-list">
-        ${wordbooks.length ? groupedWordbooks().map(renderManageGroup).join("") : `<div class="empty-note">JSON 업로드나 직접 입력으로 새 단어장을 추가하세요.</div>`}
+        ${visibleWordbooks.length
+          ? visibleGroups.map(renderManageGroup).join("")
+          : `<div class="empty-note">${hasSearch ? "검색 결과가 없습니다." : "JSON 업로드나 직접 입력으로 새 단어장을 추가하세요."}</div>`}
       </div>
     </section>
   `;
@@ -936,7 +954,7 @@ function renderManageGroup(section: WordbookGroup): string {
   return `
     <section class="manage-group">
       <div class="group-heading">
-        <span>=== ${escapeHtml(section.group)} ===</span>
+        <span>${escapeHtml(section.group)}</span>
         <small>${section.books.length}개 단어장 · ${wordCount}개 단어</small>
       </div>
       ${section.books.map(renderManageItem).join("")}
@@ -1009,11 +1027,14 @@ function renderGroupManageItem(group: WordbookGroupSummary): string {
 }
 
 function renderAnswersTab(): string {
+  const visibleResults = filteredResults();
+  const hasSearch = Boolean(answerSearch.trim());
+
   return `
     <section class="page-header">
       <div>
         <p class="eyebrow">학습 기록</p>
-        <h2>${results.length ? `${results.length}개 저장됨` : "저장된 기록"}</h2>
+        <h2>${results.length ? `${hasSearch ? visibleResults.length : results.length}개 저장됨` : "저장된 기록"}</h2>
       </div>
       <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
     </section>
@@ -1023,15 +1044,25 @@ function renderAnswersTab(): string {
         <div class="answer-index-top">
           <div>
             <p class="eyebrow">최근순</p>
-            <h3>${results.length ? "기록 목록" : "기록 없음"}</h3>
+            <h3>${visibleResults.length ? "기록 목록" : "기록 없음"}</h3>
           </div>
-          ${results[0] ? `<span>${formatDate(results[0].createdAt)}</span>` : ""}
+          ${visibleResults[0] ? `<span>${formatDate(visibleResults[0].createdAt)}</span>` : ""}
         </div>
-        ${results.length ? `
-          <div class="answer-list answer-list-full">
-            ${results.map(renderResultItem).join("")}
+        <form class="search-form answer-search-form" id="answer-search-form">
+          <label class="field search-field">
+            <span>기록 검색</span>
+            <input name="query" type="search" maxlength="120" value="${escapeAttribute(answerSearch)}" placeholder="단어장, 출제 방식" />
+          </label>
+          <div class="search-actions">
+            <button class="primary-button mini-button" type="submit">검색</button>
+            ${hasSearch ? `<button class="ghost-button mini-button" id="clear-answer-search" type="button">초기화</button>` : ""}
           </div>
-        ` : `<div class="empty-note">아직 저장된 학습 기록이 없습니다.</div>`}
+        </form>
+        ${visibleResults.length ? `
+          <div class="answer-list answer-list-full">
+            ${visibleResults.map(renderResultItem).join("")}
+          </div>
+        ` : `<div class="empty-note">${hasSearch ? "검색 결과가 없습니다." : "아직 저장된 학습 기록이 없습니다."}</div>`}
       </div>
     </section>
   `;
@@ -1359,6 +1390,32 @@ function bindEvents(): void {
     void refreshAndRender();
   });
 
+  document.querySelector<HTMLFormElement>("#wordbook-search-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    wordbookSearch = String(new FormData(event.currentTarget as HTMLFormElement).get("query") ?? "").trim();
+    clearToast();
+    render();
+  });
+
+  document.querySelector<HTMLButtonElement>("#clear-wordbook-search")?.addEventListener("click", () => {
+    wordbookSearch = "";
+    clearToast();
+    render();
+  });
+
+  document.querySelector<HTMLFormElement>("#answer-search-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    answerSearch = String(new FormData(event.currentTarget as HTMLFormElement).get("query") ?? "").trim();
+    clearToast();
+    render();
+  });
+
+  document.querySelector<HTMLButtonElement>("#clear-answer-search")?.addEventListener("click", () => {
+    answerSearch = "";
+    clearToast();
+    render();
+  });
+
   document.querySelector<HTMLButtonElement>("#logout-button")?.addEventListener("click", () => {
     void logout();
   });
@@ -1540,6 +1597,8 @@ function resetAuthenticatedState(): void {
   selectedResultId = "";
   activeTest = null;
   activeMemorize = null;
+  wordbookSearch = "";
+  answerSearch = "";
   clearTimer();
 }
 
@@ -2228,10 +2287,10 @@ function currentAnswerSelectionId(): string {
   return selectedResultId || selectedResult?.id || results[0]?.id || "";
 }
 
-function groupedWordbooks(): WordbookGroup[] {
+function groupedWordbooks(source: WordbookSummary[] = wordbooks): WordbookGroup[] {
   const groups = new Map<string, WordbookSummary[]>();
 
-  for (const book of wordbooks) {
+  for (const book of source) {
     const group = normalizeGroupName(book.group);
     groups.set(group, [...(groups.get(group) ?? []), book]);
   }
@@ -2252,13 +2311,48 @@ function groupedWordbooks(): WordbookGroup[] {
     });
 }
 
+function filteredWordbooks(): WordbookSummary[] {
+  const query = normalizeSearch(wordbookSearch);
+  if (!query) {
+    return wordbooks;
+  }
+  return wordbooks.filter((book) => matchesSearch(query, [
+    book.name,
+    book.group,
+    book.description,
+    book.sourceFilename ?? "",
+    sourceLabel(book.source)
+  ]));
+}
+
+function filteredResults(): ResultSummary[] {
+  const query = normalizeSearch(answerSearch);
+  if (!query) {
+    return results;
+  }
+  return results.filter((result) => matchesSearch(query, [
+    result.wordbookName,
+    modeLabel(result.mode),
+    String(result.questionCount),
+    formatDate(result.createdAt)
+  ]));
+}
+
+function matchesSearch(query: string, values: string[]): boolean {
+  return values.some((value) => normalizeSearch(value).includes(query));
+}
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLocaleLowerCase("ko-KR");
+}
+
 function renderWordbookSelectOptions(): string {
   if (!wordbooks.length) {
     return `<option value="">단어장이 없습니다</option>`;
   }
 
   return groupedWordbooks().map((section) => `
-    <optgroup label="=== ${escapeAttribute(section.group)} ===">
+    <optgroup label="${escapeAttribute(section.group)}">
       ${section.books.map((book) => `
         <option value="${book.id}" ${book.id === selectedWordbookId ? "selected" : ""}>
           ${escapeHtml(book.name)} (${book.wordCount}개)

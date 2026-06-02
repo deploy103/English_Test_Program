@@ -46,6 +46,30 @@
   }
 }
 
+@keyframes bar-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes answer-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -63,6 +87,15 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 3px;
 }
 
 button,
@@ -113,6 +146,7 @@ a {
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 14px 34px rgba(17, 24, 39, 0.09);
   backdrop-filter: blur(14px);
+  animation: bar-drop 280ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
 }
 
 .app-title {
@@ -339,12 +373,33 @@ a {
 
 .nav-button {
   display: grid;
+  position: relative;
   align-items: center;
   min-height: 44px;
-  padding: 0 15px;
+  overflow: hidden;
+  padding: 0 15px 0 24px;
   text-align: left;
   font-size: 14px;
   font-weight: 800;
+}
+
+.nav-button::before {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  width: 5px;
+  height: 20px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  content: "";
+  opacity: 0;
+  transform: translateY(-50%) scaleY(0.7);
+  transition: opacity 180ms ease, transform 180ms ease, background 180ms ease;
+}
+
+.nav-button:hover::before {
+  opacity: 0.55;
+  transform: translateY(-50%) scaleY(1);
 }
 
 .nav-button.is-active,
@@ -354,6 +409,13 @@ a {
     linear-gradient(135deg, #ecfdf5, #eff6ff);
   color: #065f46;
   box-shadow: 0 10px 22px rgba(16, 185, 129, 0.12);
+}
+
+.nav-button.is-active::before {
+  background:
+    linear-gradient(180deg, #f59e0b, #10b981);
+  opacity: 1;
+  transform: translateY(-50%) scaleY(1);
 }
 
 .side-section {
@@ -406,6 +468,14 @@ a {
 }
 
 .side-group-title {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 26px;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #eff6ff;
   color: #2563eb;
   font-size: 12px;
   font-weight: 900;
@@ -670,9 +740,16 @@ a {
   padding: 18px;
   border: 1px solid #dfe5e8;
   border-radius: 24px;
-  background: #ffffff;
+  background:
+    linear-gradient(180deg, #ffffff, #fbfdff);
   box-shadow: 0 10px 24px rgba(17, 24, 39, 0.05);
   animation: page-rise 300ms ease both;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.panel:hover {
+  border-color: #d4dee5;
+  box-shadow: 0 16px 34px rgba(17, 24, 39, 0.07);
 }
 
 .panel h3 {
@@ -730,6 +807,26 @@ a {
 .management-actions {
   display: grid;
   gap: 8px;
+}
+
+.search-form {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e0e7ff;
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, #f8fafc, #eef6ff);
+}
+
+.search-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.answer-search-form {
+  margin-bottom: 14px;
 }
 
 .account-section {
@@ -973,6 +1070,7 @@ textarea:focus {
   background:
     linear-gradient(135deg, #047857, #1d4ed8);
   transform: translateY(-1px);
+  box-shadow: 0 16px 30px rgba(37, 99, 235, 0.22);
 }
 
 .ghost-button {
@@ -1418,6 +1516,10 @@ textarea:focus {
 
 .memory-card.is-answer {
   gap: 20px;
+  border-color: rgba(253, 230, 138, 0.32);
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.34), rgba(30, 41, 59, 0.36));
+  animation: answer-reveal 240ms ease both;
 }
 
 .memory-prompt {
@@ -1433,6 +1535,7 @@ textarea:focus {
   font-weight: 900;
   line-height: 1.15;
   overflow-wrap: anywhere;
+  animation: answer-reveal 260ms ease both;
 }
 
 .time-gauge {
@@ -1550,6 +1653,10 @@ textarea:focus {
 
   .header-actions {
     display: grid;
+  }
+
+  .search-actions {
+    grid-template-columns: 1fr;
   }
 
   .segmented {

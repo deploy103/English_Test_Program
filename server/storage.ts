@@ -170,7 +170,7 @@ export async function createWordbook(input: CreateWordbookInput): Promise<Wordbo
     description: normalizeDescription(input.description),
     words,
     source: input.source,
-    sourceFilename: input.sourceFilename,
+    sourceFilename: normalizeSourceFilename(input.sourceFilename),
     createdAt: now,
     updatedAt: now
   };
@@ -381,8 +381,8 @@ export async function listResults(ownerId: string): Promise<ResultSummary[]> {
 
 export async function getResult(id: string, ownerId: string): Promise<TestResult> {
   const owner = normalizeOwnerId(ownerId);
-  const result = await readRecord<TestResult>(resultPath(id), "정답지를 찾을 수 없습니다.");
-  assertOwner(result.ownerId, owner, "정답지를 찾을 수 없습니다.");
+  const result = await readRecord<TestResult>(resultPath(id), "학습 기록을 찾을 수 없습니다.");
+  assertOwner(result.ownerId, owner, "학습 기록을 찾을 수 없습니다.");
   return result;
 }
 
@@ -419,8 +419,8 @@ export function formatResult(result: TestResult, format: AnswerFormat): string {
 
   if (format === "txt") {
     const lines = [
-      `${result.wordbookName} 정답지`,
-      `테스트 ID: ${result.id}`,
+      `${result.wordbookName} 학습 기록`,
+      `퀴즈 ID: ${result.id}`,
       `생성: ${formatDate(result.createdAt)}`,
       `문제 수: ${result.questionCount}`,
       "",
@@ -464,7 +464,7 @@ export function sanitizeDownloadName(name: string): string {
     .replace(/[\\/:*?"<>|]/g, "")
     .replace(/\s+/g, "_")
     .trim();
-  return safe || "answer-sheet";
+  return safe || "learning-record";
 }
 
 export async function safeRemove(filePath: string | undefined): Promise<void> {
@@ -659,6 +659,18 @@ function normalizeName(value: string): string {
 
 function normalizeDescription(value: string | undefined): string {
   return (value ?? "").trim().slice(0, 500);
+}
+
+function normalizeSourceFilename(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const filename = path.basename(value.replaceAll("\\", "/"))
+    .normalize("NFKC")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .trim()
+    .slice(0, 180);
+  return filename || undefined;
 }
 
 function normalizeGroup(value: string | undefined): string {
