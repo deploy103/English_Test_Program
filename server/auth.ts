@@ -561,8 +561,8 @@ function normalizeName(value: string): string {
 }
 
 function assertStrongPassword(value: string): void {
-  if (value.length < 12 || value.length > 128) {
-    badRequest("비밀번호는 12자 이상 128자 이하로 입력하세요.");
+  if (value.length < 8 || value.length > 128) {
+    badRequest("비밀번호는 8자 이상 128자 이하로 입력하세요.");
   }
   if (!/[A-Za-z]/.test(value) || !/[0-9]/.test(value) || !/[^A-Za-z0-9]/.test(value)) {
     badRequest("비밀번호에는 영문, 숫자, 특수문자를 모두 포함하세요.");

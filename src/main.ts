@@ -519,9 +519,9 @@ function renderRegisterForm(): string {
       </label>
       <label class="field">
         <span>비밀번호</span>
-        <input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
+        <input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
       </label>
-      <p class="auth-hint">비밀번호는 12자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.</p>
+      <p class="auth-hint">비밀번호는 8자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.</p>
       <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>${isBusy ? "생성 중..." : "회원가입"}</button>
     </form>
   `;
@@ -1049,9 +1049,9 @@ function renderSettingsTab(): string {
         </label>
         <label class="field">
           <span>새 비밀번호</span>
-          <input name="nextPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
+          <input name="nextPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
         </label>
-        <p class="auth-hint">새 비밀번호는 12자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.</p>
+        <p class="auth-hint">새 비밀번호는 8자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.</p>
         <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>변경</button>
       </form>
 
