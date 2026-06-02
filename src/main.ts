@@ -75,6 +75,58 @@ interface ResultSummary {
   completedAt?: string;
 }
 
+interface StatsRange {
+  from: string;
+  to: string;
+  days: number;
+}
+
+interface ModeStats {
+  en: number;
+  ko: number;
+  rand: number;
+}
+
+interface OverallLearningStats {
+  testCount: number;
+  questionCount: number;
+  wordbookCount: number;
+  averageQuestionsPerTest: number;
+  averageDisplaySeconds: number;
+  modeCounts: ModeStats;
+  firstCompletedAt?: string;
+  lastCompletedAt?: string;
+}
+
+interface WordbookLearningStats {
+  wordbookId: string;
+  wordbookName: string;
+  testCount: number;
+  questionCount: number;
+  averageQuestionsPerTest: number;
+  averageDisplaySeconds: number;
+  modeCounts: ModeStats;
+  lastCompletedAt?: string;
+}
+
+interface DailyLearningStats {
+  date: string;
+  testCount: number;
+  questionCount: number;
+}
+
+interface LearningStats {
+  range: StatsRange;
+  overall: OverallLearningStats;
+  wordbooks: WordbookLearningStats[];
+  daily: DailyLearningStats[];
+}
+
+interface StatsRangeDraft {
+  from: string;
+  to: string;
+}
+
 interface WordbookGroupSummary {
   id: string;
   ownerId?: string;
@@ -151,7 +203,7 @@ interface AuthSessionSummary {
 }
 
 type AuthMode = "login" | "register";
-type TabKey = "home" | "test" | "memorize" | "add" | "settings" | "groups" | "manage" | "answers" | "admin";
+type TabKey = "home" | "test" | "memorize" | "add" | "settings" | "groups" | "manage" | "answers" | "stats" | "admin";
 type PlayPageKey = "testPlay" | "memorizePlay";
 type PageKey = TabKey | PlayPageKey | "answerDetail";
 type ActivePhase = "countdown" | "prompt" | "writing" | "done";
@@ -196,6 +248,8 @@ let tab: TabKey = "home";
 let wordbooks: WordbookSummary[] = [];
 let groups: WordbookGroupSummary[] = [];
 let results: ResultSummary[] = [];
+let stats: LearningStats | null = null;
+let statsRangeDraft: StatsRangeDraft = defaultStatsRangeDraft();
 let selectedWordbookId = "";
 let selectedResult: TestResult | null = null;
 let selectedResultId = "";
@@ -204,6 +258,7 @@ let activeMemorize: ActiveMemorize | null = null;
 let timer: number | null = null;
 let toastMessage = "";
 let isBusy = false;
+let isStatsLoading = false;
 let isSidebarOpen = false;
 let isAnswerLoading = false;
 let answerRequestToken = 0;
@@ -246,6 +301,7 @@ const TAB_ROUTES: Record<TabKey, string> = {
   groups: "/groups",
   manage: "/wordbooks",
   answers: "/answers",
+  stats: "/stats",
   admin: "/admin"
 };
 const PLAY_ROUTES: Record<PlayPageKey, string> = {
@@ -480,6 +536,7 @@ function renderSidebar(): string {
         ${renderNavButton("manage", "단어장")}
         ${renderNavButton("groups", "그룹")}
         ${renderNavButton("answers", "기록")}
+        ${renderNavButton("stats", "통계")}
         ${renderNavButton("settings", "설정")}
         ${currentUser?.role === "admin" ? renderNavButton("admin", "관리자") : ""}
       </nav>
@@ -549,6 +606,9 @@ function navIcon(key: TabKey): string {
   if (key === "answers") {
     return `<svg viewBox="0 0 24 24"><path d="M5 19V5" /><path d="M5 19h16" /><path d="M9 15v-4" /><path d="M13 15V8" /><path d="M17 15v-6" /></svg>`;
   }
+  if (key === "stats") {
+    return `<svg viewBox="0 0 24 24"><path d="M4 19V5" /><path d="M4 19h17" /><path d="m8 15 3-4 3 2 4-7" /><path d="M8 15v3" /><path d="M11 11v7" /><path d="M14 13v5" /><path d="M18 6v12" /></svg>`;
+  }
   if (key === "settings") {
     return `<svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" /><path d="M12 3v3" /><path d="M12 18v3" /><path d="M4.8 4.8l2.1 2.1" /><path d="m17.1 17.1 2.1 2.1" /><path d="M3 12h3" /><path d="M18 12h3" /><path d="m4.8 19.2 2.1-2.1" /><path d="m17.1 6.9 2.1-2.1" /></svg>`;
   }
@@ -586,6 +646,11 @@ function renderHomeTab(): string {
         <span>학습 기록</span>
         <strong>${results.length}개 기록</strong>
         <small>퀴즈 결과를 다시 확인하고 다운로드하세요.</small>
+      </button>
+      <button class="home-action-card" data-tab="stats" type="button">
+        <span>통계</span>
+        <strong>기간별 학습량</strong>
+        <small>전체와 단어장별 테스트 흐름을 확인하세요.</small>
       </button>
     </section>
 
@@ -665,6 +730,9 @@ function renderCurrentTab(): string {
   }
   if (page === "answers") {
     return renderAnswersTab();
+  }
+  if (page === "stats") {
+    return renderStatsTab();
   }
   if (page === "answerDetail") {
     return renderAnswerDetailPage();
@@ -1468,6 +1536,139 @@ function renderAnswersTab(): string {
   `;
 }
 
+function renderStatsTab(): string {
+  const currentStats = stats;
+  const maxDailyQuestions = Math.max(1, ...(currentStats?.daily.map((entry) => entry.questionCount) ?? [0]));
+
+  return `
+    <section class="page-header">
+      <div>
+        <p class="eyebrow">통계</p>
+        <h2>${currentStats ? `${currentStats.range.from} ~ ${currentStats.range.to}` : "학습 통계"}</h2>
+      </div>
+      <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
+    </section>
+
+    <form class="panel stats-filter" id="stats-range-form">
+      <label class="field">
+        <span>시작일</span>
+        <input name="from" type="date" value="${escapeAttribute(statsRangeDraft.from)}" min="${statsMinDate()}" max="${statsMaxDate()}" required />
+      </label>
+      <label class="field">
+        <span>종료일</span>
+        <input name="to" type="date" value="${escapeAttribute(statsRangeDraft.to)}" min="${statsMinDate()}" max="${statsMaxDate()}" required />
+      </label>
+      <div class="stats-filter-actions">
+        <button class="primary-button mini-button" type="submit">조회</button>
+        <button class="ghost-button mini-button" data-stats-range-days="7" type="button">7일</button>
+        <button class="ghost-button mini-button" data-stats-range-days="30" type="button">30일</button>
+        <button class="ghost-button mini-button" data-stats-range-days="365" type="button">1년</button>
+      </div>
+    </form>
+
+    ${isStatsLoading ? `<section class="panel"><div class="empty-note">통계를 불러오는 중입니다.</div></section>` : currentStats ? `
+      <section class="stats-grid">
+        <article class="panel stats-overview">
+          <div class="metric-row stats-metrics">
+            <div>
+              <span class="metric-value">${formatCount(currentStats.overall.testCount)}</span>
+              <span class="metric-label">완료 테스트</span>
+            </div>
+            <div>
+              <span class="metric-value">${formatCount(currentStats.overall.questionCount)}</span>
+              <span class="metric-label">출제 문항</span>
+            </div>
+            <div>
+              <span class="metric-value">${formatCount(currentStats.overall.wordbookCount)}</span>
+              <span class="metric-label">사용 단어장</span>
+            </div>
+            <div>
+              <span class="metric-value">${formatStatNumber(currentStats.overall.averageQuestionsPerTest)}</span>
+              <span class="metric-label">평균 문항</span>
+            </div>
+          </div>
+          <div class="stats-mode-row">
+            ${renderModeStat("랜덤", currentStats.overall.modeCounts.rand)}
+            ${renderModeStat("영어", currentStats.overall.modeCounts.en)}
+            ${renderModeStat("한글", currentStats.overall.modeCounts.ko)}
+          </div>
+        </article>
+
+        <article class="panel stats-daily-panel">
+          <div class="panel-title-row">
+            <h3>일자별 출제 문항</h3>
+            <span class="muted">${currentStats.range.days}일</span>
+          </div>
+          ${currentStats.daily.some((entry) => entry.questionCount > 0)
+            ? `<div class="stats-bars">${currentStats.daily.map((entry) => renderDailyStat(entry, maxDailyQuestions)).join("")}</div>`
+            : `<div class="empty-note">선택한 기간에 완료된 테스트가 없습니다.</div>`}
+        </article>
+
+        <article class="panel stats-wordbook-panel">
+          <div class="panel-title-row">
+            <h3>단어장별 통계</h3>
+            <span class="muted">${currentStats.wordbooks.length}개</span>
+          </div>
+          ${currentStats.wordbooks.length ? `
+            <div class="answer-table-wrap stats-table-wrap">
+              <table class="answer-table stats-table">
+                <thead>
+                  <tr>
+                    <th>단어장</th>
+                    <th>테스트</th>
+                    <th>문항</th>
+                    <th>평균</th>
+                    <th>출제 방식</th>
+                    <th>최근</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${currentStats.wordbooks.map(renderWordbookStatRow).join("")}
+                </tbody>
+              </table>
+            </div>
+          ` : `<div class="empty-note">선택한 기간에 단어장별 통계가 없습니다.</div>`}
+        </article>
+      </section>
+    ` : `<section class="panel"><div class="empty-note">통계를 불러오지 못했습니다.</div></section>`}
+  `;
+}
+
+function renderModeStat(label: string, value: number): string {
+  return `
+    <span>
+      <strong>${formatCount(value)}</strong>
+      <small>${label}</small>
+    </span>
+  `;
+}
+
+function renderDailyStat(entry: DailyLearningStats, maxQuestions: number): string {
+  const heightPercent = Math.max(6, Math.round((entry.questionCount / maxQuestions) * 100));
+  return `
+    <div class="stats-bar-item">
+      <span class="stats-bar-value">${entry.questionCount ? formatCount(entry.questionCount) : ""}</span>
+      <div class="stats-bar-track">
+        <div class="stats-bar-fill" style="height: ${heightPercent}%"></div>
+      </div>
+      <span class="stats-bar-label">${formatShortDate(entry.date)}</span>
+    </div>
+  `;
+}
+
+function renderWordbookStatRow(entry: WordbookLearningStats): string {
+  return `
+    <tr>
+      <td>${escapeHtml(entry.wordbookName)}</td>
+      <td>${formatCount(entry.testCount)}</td>
+      <td>${formatCount(entry.questionCount)}</td>
+      <td>${formatStatNumber(entry.averageQuestionsPerTest)}</td>
+      <td>${modeStatsLabel(entry.modeCounts)}</td>
+      <td>${entry.lastCompletedAt ? formatDate(entry.lastCompletedAt) : "-"}</td>
+    </tr>
+  `;
+}
+
 function renderAnswerDetailPage(): string {
   const activeId = currentAnswerSelectionId();
   const result = selectedResult?.id === activeId ? selectedResult : null;
@@ -1860,6 +2061,22 @@ function bindEvents(): void {
     render();
   });
 
+  document.querySelector<HTMLFormElement>("#stats-range-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void updateStatsRangeFromForm(new FormData(event.currentTarget as HTMLFormElement));
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-stats-range-days]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const days = Number(button.dataset.statsRangeDays);
+      if (!Number.isInteger(days)) {
+        return;
+      }
+      statsRangeDraft = statsRangeDraftForDays(days);
+      void loadStats();
+    });
+  });
+
   document.querySelector<HTMLButtonElement>("#logout-button")?.addEventListener("click", () => {
     void logout();
   });
@@ -2217,6 +2434,8 @@ function resetAuthenticatedState(): void {
   wordbooks = [];
   groups = [];
   results = [];
+  stats = null;
+  statsRangeDraft = defaultStatsRangeDraft();
   adminUsers = [];
   adminWordbooks = [];
   adminLibraryWordbooks = [];
@@ -2230,6 +2449,7 @@ function resetAuthenticatedState(): void {
   selectedResultId = "";
   activeTest = null;
   activeMemorize = null;
+  isStatsLoading = false;
   wordbookSearch = "";
   answerSearch = "";
   editingWordbookId = "";
@@ -2426,6 +2646,56 @@ async function loadResultDetail(id: string): Promise<void> {
       render();
     }
   }
+}
+
+async function loadStats(): Promise<void> {
+  if (!currentUser) {
+    return;
+  }
+
+  isStatsLoading = true;
+  clearToast();
+  render();
+
+  try {
+    const query = new URLSearchParams({
+      from: statsRangeDraft.from,
+      to: statsRangeDraft.to
+    });
+    const loaded = await api<LearningStats>(`/api/stats?${query.toString()}`);
+    stats = loaded;
+    statsRangeDraft = {
+      from: loaded.range.from,
+      to: loaded.range.to
+    };
+  } catch (error) {
+    stats = null;
+    showToast(error instanceof Error ? error.message : "통계를 불러오지 못했습니다.");
+  } finally {
+    isStatsLoading = false;
+    render();
+  }
+}
+
+async function updateStatsRangeFromForm(formData: FormData): Promise<void> {
+  const from = String(formData.get("from") ?? "");
+  const to = String(formData.get("to") ?? "");
+  if (!isDateInputValue(from) || !isDateInputValue(to)) {
+    showToast("날짜를 선택하세요.");
+    return;
+  }
+  const days = statsRangeDays(from, to);
+  if (days < 1) {
+    showToast("시작일은 종료일보다 늦을 수 없습니다.");
+    return;
+  }
+  if (days > 366) {
+    showToast("통계 기간은 최대 1년까지만 선택할 수 있습니다.");
+    return;
+  }
+
+  statsRangeDraft = { from, to };
+  await loadStats();
 }
 
 async function deleteWordbookById(id: string): Promise<void> {
@@ -2841,6 +3111,11 @@ async function syncPageData(): Promise<void> {
     isAnswerLoading = false;
   }
 
+  if (page === "stats") {
+    await loadStats();
+    return;
+  }
+
   render();
 }
 
@@ -2899,6 +3174,9 @@ function parseRoute(pathname: string): { page: PageKey; resultId?: string } {
   if (segments[0] === "answers") {
     return { page: "answers" };
   }
+  if (segments[0] === "stats") {
+    return { page: "stats" };
+  }
 
   window.history.replaceState(null, "", TAB_ROUTES.home);
   return { page: "home" };
@@ -2934,6 +3212,11 @@ async function refreshAndRender(): Promise<void> {
   if (page === "answers") {
     selectedResult = null;
     selectedResultId = "";
+  }
+
+  if (page === "stats") {
+    await loadStats();
+    return;
   }
 
   render();
@@ -3291,6 +3574,9 @@ function tabLabel(value: TabKey): string {
   if (value === "answers") {
     return "기록";
   }
+  if (value === "stats") {
+    return "통계";
+  }
   if (value === "settings") {
     return "설정";
   }
@@ -3322,6 +3608,71 @@ function loadColorMode(): ColorMode {
 
 function applyColorMode(): void {
   document.documentElement.dataset.theme = colorMode;
+}
+
+function defaultStatsRangeDraft(): StatsRangeDraft {
+  return statsRangeDraftForDays(7);
+}
+
+function statsRangeDraftForDays(days: number): StatsRangeDraft {
+  const safeDays = Math.max(1, Math.min(365, days));
+  const to = new Date();
+  const from = addDaysForInput(to, -(safeDays - 1));
+  return {
+    from: dateInputValue(from),
+    to: dateInputValue(to)
+  };
+}
+
+function statsMinDate(): string {
+  return dateInputValue(addDaysForInput(new Date(), -365));
+}
+
+function statsMaxDate(): string {
+  return dateInputValue(new Date());
+}
+
+function statsRangeDays(from: string, to: string): number {
+  const fromDate = dateFromInputValue(from);
+  const toDate = dateFromInputValue(to);
+  return Math.floor((toDate.getTime() - fromDate.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function isDateInputValue(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(dateFromInputValue(value).getTime());
+}
+
+function dateInputValue(value: Date): string {
+  const local = new Date(value.getTime() - value.getTimezoneOffset() * 60 * 1000);
+  return local.toISOString().slice(0, 10);
+}
+
+function dateFromInputValue(value: string): Date {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addDaysForInput(value: Date, days: number): Date {
+  const next = new Date(value);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function formatCount(value: number): string {
+  return new Intl.NumberFormat("ko-KR").format(value);
+}
+
+function formatStatNumber(value: number): string {
+  return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 1 }).format(value);
+}
+
+function formatShortDate(value: string): string {
+  const date = dateFromInputValue(value);
+  return new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit" }).format(date);
+}
+
+function modeStatsLabel(value: ModeStats): string {
+  return `랜덤 ${formatCount(value.rand)} · 영어 ${formatCount(value.en)} · 한글 ${formatCount(value.ko)}`;
 }
 
 function formatDate(value: string): string {

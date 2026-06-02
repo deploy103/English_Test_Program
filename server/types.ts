@@ -188,3 +188,50 @@ export interface ResultSummary {
   createdAt: string;
   completedAt?: string;
 }
+
+export interface StatsRange {
+  from: string;
+  to: string;
+  days: number;
+}
+
+export interface ModeStats {
+  en: number;
+  ko: number;
+  rand: number;
+}
+
+export interface OverallLearningStats {
+  testCount: number;
+  questionCount: number;
+  wordbookCount: number;
+  averageQuestionsPerTest: number;
+  averageDisplaySeconds: number;
+  modeCounts: ModeStats;
+  firstCompletedAt?: string;
+  lastCompletedAt?: string;
+}
+
+export interface WordbookLearningStats {
+  wordbookId: string;
+  wordbookName: string;
+  testCount: number;
+  questionCount: number;
+  averageQuestionsPerTest: number;
+  averageDisplaySeconds: number;
+  modeCounts: ModeStats;
+  lastCompletedAt?: string;
+}
+
+export interface DailyLearningStats {
+  date: string;
+  testCount: number;
+  questionCount: number;
+}
+
+export interface LearningStats {
+  range: StatsRange;
+  overall: OverallLearningStats;
+  wordbooks: WordbookLearningStats[];
+  daily: DailyLearningStats[];
+}

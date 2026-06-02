@@ -30,6 +30,7 @@ import {
 import {
   adoptLegacyDataForOwner,
   HttpError,
+  MAX_JSON_UPLOAD_BYTES,
   UPLOAD_DIR,
   assignLibraryWordbookToUser,
   contentTypeFor,
@@ -43,6 +44,7 @@ import {
   deleteWordbook,
   extensionFor,
   formatResult,
+  getLearningStats,
   getLibraryWordbook,
   getResult,
   getWordbook,
@@ -63,13 +65,23 @@ import {
   startTest,
   updateWordbook
 } from "./storage.js";
-import type { AnswerFormat, SessionRecord, TestMode, UserRecord, WordEntry } from "./types.js";
+import type { AnswerFormat, SessionRecord, StatsRange, TestMode, UserRecord, WordEntry } from "./types.js";
 
 const PORT = Number(process.env.PORT || 3000);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX = 60;
+const UPLOAD_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const UPLOAD_RATE_LIMIT_MAX = 20;
+const MAX_UPLOAD_FIELD_BYTES = 2048;
+const MAX_UPLOAD_FIELD_NAME_BYTES = 64;
+const MAX_UPLOAD_HEADER_PAIRS = 50;
+const STATS_DEFAULT_DAYS = 7;
+const STATS_MAX_DAYS = 366;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const authRateLimits = new Map<string, { count: number; resetAt: number }>();
+const uploadRateLimits = new Map<string, { count: number; resetAt: number }>();
+const JSON_UPLOAD_MIME_TYPES = new Set(["application/json", "application/x-json", "text/json"]);
 
 await initializeStorage();
 await initializeAuthStorage();
@@ -78,13 +90,23 @@ const app = express();
 app.set("trust proxy", process.env.TRUST_PROXY === "1" ? 1 : false);
 const upload = multer({
   dest: UPLOAD_DIR,
-  limits: { fileSize: 2 * 1024 * 1024 },
+  preservePath: false,
+  limits: {
+    fieldNameSize: MAX_UPLOAD_FIELD_NAME_BYTES,
+    fieldSize: MAX_UPLOAD_FIELD_BYTES,
+    fields: 3,
+    fileSize: MAX_JSON_UPLOAD_BYTES,
+    files: 1,
+    parts: 4,
+    headerPairs: MAX_UPLOAD_HEADER_PAIRS
+  },
   fileFilter: (_request, file, callback) => {
-    if (file.mimetype === "application/json" || file.originalname.toLowerCase().endsWith(".json")) {
-      callback(null, true);
+    const error = validateJsonUploadMetadata(file);
+    if (error) {
+      callback(error);
       return;
     }
-    callback(new HttpError(400, "JSON 파일만 업로드할 수 있습니다."));
+    callback(null, true);
   }
 });
 
@@ -253,7 +275,7 @@ app.get("/api/admin/library-wordbooks/:id", requireAdmin, asyncRoute(async (requ
   });
 }));
 
-app.post("/api/admin/library-wordbooks/upload", requireAdmin, upload.single("file"), asyncRoute(async (request, response) => {
+app.post("/api/admin/library-wordbooks/upload", requireAdmin, rateLimitUpload, upload.single("file"), asyncRoute(async (request, response) => {
   const uploadedPath = request.file?.path;
   if (!uploadedPath || !request.file) {
     throw new HttpError(400, "업로드할 JSON 파일을 선택하세요.");
@@ -265,7 +287,7 @@ app.post("/api/admin/library-wordbooks/upload", requireAdmin, upload.single("fil
     const submittedGroup = normalizeOptionalFormText(request.body.group);
     const submittedDescription = normalizeOptionalFormText(request.body.description);
     const created = await createLibraryWordbook({
-      name: submittedName ?? parsed.name ?? path.parse(request.file.originalname).name,
+      name: submittedName ?? parsed.name ?? uploadWordbookNameFallback(request.file),
       group: submittedGroup ?? parsed.group,
       description: submittedDescription ?? parsed.description,
       words: parsed.words
@@ -389,7 +411,7 @@ app.post("/api/wordbooks/manual", asyncRoute(async (request, response) => {
   response.status(201).json(created);
 }));
 
-app.post("/api/wordbooks/upload", upload.single("file"), asyncRoute(async (request, response) => {
+app.post("/api/wordbooks/upload", rateLimitUpload, upload.single("file"), asyncRoute(async (request, response) => {
   const uploadedPath = request.file?.path;
   if (!uploadedPath || !request.file) {
     throw new HttpError(400, "업로드할 JSON 파일을 선택하세요.");
@@ -402,12 +424,12 @@ app.post("/api/wordbooks/upload", upload.single("file"), asyncRoute(async (reque
     const submittedDescription = normalizeOptionalFormText(request.body.description);
     const created = await createWordbook({
       ownerId: authOf(request).user.id,
-      name: submittedName ?? parsed.name ?? path.parse(request.file.originalname).name,
+      name: submittedName ?? parsed.name ?? uploadWordbookNameFallback(request.file),
       group: submittedGroup ?? parsed.group,
       description: submittedDescription ?? parsed.description,
       words: parsed.words,
       source: "upload",
-      sourceFilename: request.file.originalname
+      sourceFilename: normalizedUploadFilename(request.file)
     });
     await safeRemove(uploadedPath);
     await appendAuditLog(auditFrom(request, "wordbook.upload", "success", created.name, created.id));
@@ -452,6 +474,11 @@ app.post("/api/tests/start", asyncRoute(async (request, response) => {
   });
   await appendAuditLog(auditFrom(request, "test.start", "success", result.wordbookName, result.wordbookId));
   response.status(201).json(result);
+}));
+
+app.get("/api/stats", asyncRoute(async (request, response) => {
+  const range = parseStatsRange(request.query.from, request.query.to);
+  response.json(await getLearningStats(authOf(request).user.id, range.output, range.fromInclusive, range.toExclusive));
 }));
 
 app.get("/api/results", asyncRoute(async (request, response) => {
@@ -505,7 +532,7 @@ if (process.env.NODE_ENV === "production") {
 
 app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
   if (error instanceof multer.MulterError) {
-    response.status(400).json({ message: error.message });
+    response.status(400).json({ message: uploadLimitMessage(error) });
     return;
   }
 
@@ -625,6 +652,43 @@ function rejectUnsupportedApiContentType(request: Request, response: Response, n
   response.status(415).json({ message: "지원하지 않는 요청 형식입니다." });
 }
 
+function validateJsonUploadMetadata(file: Express.Multer.File): Error | null {
+  const originalName = file.originalname.normalize("NFKC").trim();
+  const filename = normalizedUploadFilename(file);
+  if (!originalName || !filename || /[\x00-\x1f\x7f]/.test(originalName)) {
+    return new HttpError(400, "파일 이름이 올바르지 않습니다.");
+  }
+  if (filename.length > 180) {
+    return new HttpError(400, "파일 이름은 180자 이하만 사용할 수 있습니다.");
+  }
+  if (path.extname(filename).toLowerCase() !== ".json") {
+    return new HttpError(400, "JSON 파일만 업로드할 수 있습니다.");
+  }
+
+  const mimeType = normalizeMimeType(file.mimetype);
+  if (!JSON_UPLOAD_MIME_TYPES.has(mimeType)) {
+    return new HttpError(400, "JSON Content-Type 파일만 업로드할 수 있습니다.");
+  }
+
+  return null;
+}
+
+function normalizedUploadFilename(file: Express.Multer.File): string {
+  return path.basename(file.originalname.replaceAll("\\", "/"))
+    .normalize("NFKC")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .trim();
+}
+
+function uploadWordbookNameFallback(file: Express.Multer.File): string {
+  const name = path.parse(normalizedUploadFilename(file)).name.trim().slice(0, 80);
+  return name || "업로드 단어장";
+}
+
+function normalizeMimeType(value: string): string {
+  return value.split(";")[0]?.trim().toLowerCase() ?? "";
+}
+
 function rateLimitAuth(request: Request, response: Response, next: NextFunction): void {
   const meta = requestMetaFrom(request);
   const key = `${meta.ipAddress ?? "unknown"}:${request.path}`;
@@ -653,6 +717,33 @@ function rateLimitAuth(request: Request, response: Response, next: NextFunction)
       message: request.path
     });
     response.status(429).json({ message: "요청이 너무 많습니다. 잠시 후 다시 시도하세요." });
+    return;
+  }
+
+  next();
+}
+
+function rateLimitUpload(request: Request, response: Response, next: NextFunction): void {
+  const key = `${authOf(request).user.id}:${request.path}`;
+  const now = Date.now();
+  for (const [entryKey, entry] of uploadRateLimits) {
+    if (entry.resetAt <= now) {
+      uploadRateLimits.delete(entryKey);
+    }
+  }
+
+  const current = uploadRateLimits.get(key);
+  const bucket = current && current.resetAt > now
+    ? current
+    : { count: 0, resetAt: now + UPLOAD_RATE_LIMIT_WINDOW_MS };
+
+  bucket.count += 1;
+  uploadRateLimits.set(key, bucket);
+
+  if (bucket.count > UPLOAD_RATE_LIMIT_MAX) {
+    response.setHeader("Retry-After", String(Math.ceil((bucket.resetAt - now) / 1000)));
+    void appendAuditLog(auditFrom(request, "security.upload_rate_limit", "failure", request.path));
+    response.status(429).json({ message: "업로드 요청이 너무 많습니다. 잠시 후 다시 시도하세요." });
     return;
   }
 
@@ -782,6 +873,64 @@ function firstForwardedValue(value: string | undefined): string | undefined {
   return value?.split(",")[0]?.trim().toLowerCase();
 }
 
+function parseStatsRange(fromValue: unknown, toValue: unknown): { output: StatsRange; fromInclusive: Date; toExclusive: Date } {
+  const today = dateOnlyUtc(new Date());
+  const toInclusive = parseDateOnlyParam(toValue) ?? today;
+  const fromInclusive = parseDateOnlyParam(fromValue) ?? addDaysUtc(toInclusive, -(STATS_DEFAULT_DAYS - 1));
+  if (fromInclusive > toInclusive) {
+    throw new HttpError(400, "시작일은 종료일보다 늦을 수 없습니다.");
+  }
+
+  const days = Math.floor((toInclusive.getTime() - fromInclusive.getTime()) / DAY_MS) + 1;
+  if (days > STATS_MAX_DAYS) {
+    throw new HttpError(400, "통계 기간은 최대 1년까지만 선택할 수 있습니다.");
+  }
+
+  return {
+    output: {
+      from: formatDateOnly(fromInclusive),
+      to: formatDateOnly(toInclusive),
+      days
+    },
+    fromInclusive,
+    toExclusive: addDaysUtc(toInclusive, 1)
+  };
+}
+
+function parseDateOnlyParam(value: unknown): Date | null {
+  if (Array.isArray(value)) {
+    return parseDateOnlyParam(value[0]);
+  }
+  if (typeof value !== "string" || !value) {
+    return null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new HttpError(400, "날짜 형식은 YYYY-MM-DD여야 합니다.");
+  }
+
+  const [yearText, monthText, dayText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    throw new HttpError(400, "날짜 값이 올바르지 않습니다.");
+  }
+  return date;
+}
+
+function dateOnlyUtc(value: Date): Date {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+}
+
+function addDaysUtc(value: Date, days: number): Date {
+  return new Date(value.getTime() + days * DAY_MS);
+}
+
+function formatDateOnly(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
 function parserErrorStatus(error: unknown): number | null {
   if (typeof error !== "object" || error === null) {
     return null;
@@ -794,6 +943,19 @@ function parserErrorStatus(error: unknown): number | null {
     return value;
   }
   return null;
+}
+
+function uploadLimitMessage(error: multer.MulterError): string {
+  if (error.code === "LIMIT_FILE_SIZE") {
+    return "JSON 파일은 2MB 이하만 업로드할 수 있습니다.";
+  }
+  if (error.code === "LIMIT_FILE_COUNT" || error.code === "LIMIT_UNEXPECTED_FILE") {
+    return "JSON 파일은 하나만 업로드할 수 있습니다.";
+  }
+  if (error.code === "LIMIT_PART_COUNT" || error.code === "LIMIT_FIELD_COUNT" || error.code === "LIMIT_FIELD_KEY" || error.code === "LIMIT_FIELD_VALUE") {
+    return "업로드 입력값이 허용 범위를 초과했습니다.";
+  }
+  return "파일 업로드에 실패했습니다.";
 }
 
 function asyncRoute(
