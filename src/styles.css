@@ -1163,6 +1163,40 @@ textarea:focus {
   line-height: 1.05;
 }
 
+.memorize-stage .progress span {
+  background: #42d392;
+}
+
+.memorize-center {
+  align-content: center;
+}
+
+.memory-card {
+  display: grid;
+  width: min(980px, 100%);
+  gap: 28px;
+  justify-items: center;
+}
+
+.memory-card.is-answer {
+  gap: 20px;
+}
+
+.memory-prompt {
+  max-width: 100%;
+}
+
+.memory-answer {
+  width: min(760px, 100%);
+  padding-top: 24px;
+  border-top: 1px solid #343f43;
+  color: #ffbd5b;
+  font-size: clamp(30px, 7vw, 82px);
+  font-weight: 900;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
 .time-gauge {
   height: 14px;
   overflow: hidden;
@@ -1304,5 +1338,14 @@ textarea:focus {
 
   .prompt-word {
     font-size: clamp(42px, 18vw, 96px);
+  }
+
+  .memory-card {
+    gap: 18px;
+  }
+
+  .memory-answer {
+    padding-top: 18px;
+    font-size: clamp(28px, 13vw, 64px);
   }
 }

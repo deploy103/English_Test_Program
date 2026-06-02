@@ -34,6 +34,10 @@ interface WordbookSummary {
   updatedAt: string;
 }
 
+interface WordbookDetail extends WordbookSummary {
+  words: WordEntry[];
+}
+
 interface WordEntry {
   english: string;
   korean: string;
@@ -118,14 +122,27 @@ interface AuditLogEntry {
 }
 
 type AuthMode = "login" | "register";
-type TabKey = "test" | "add" | "mypage" | "groups" | "manage" | "answers";
+type TabKey = "test" | "memorize" | "add" | "mypage" | "groups" | "manage" | "answers";
 type PageKey = TabKey | "answerDetail";
 type ActivePhase = "countdown" | "running" | "done";
+type MemorizeDisplayMode = "en" | "ko" | "both";
+type MemorizePhase = "prompt" | "answer" | "done";
 
 interface ActiveTest {
   phase: ActivePhase;
   result: TestResult;
   countdown: number;
+  currentIndex: number;
+  remainingMs: number;
+}
+
+interface ActiveMemorize {
+  phase: MemorizePhase;
+  wordbookId: string;
+  wordbookName: string;
+  words: WordEntry[];
+  displaySeconds: number;
+  mode: MemorizeDisplayMode;
   currentIndex: number;
   remainingMs: number;
 }
@@ -152,6 +169,7 @@ let selectedWordbookId = "";
 let selectedResult: TestResult | null = null;
 let selectedResultId = "";
 let activeTest: ActiveTest | null = null;
+let activeMemorize: ActiveMemorize | null = null;
 let timer: number | null = null;
 let toastMessage = "";
 let isBusy = false;
@@ -170,8 +188,14 @@ let isAdminWordbookLoading = false;
 let isAdminLoading = false;
 
 const DEFAULT_GROUP_NAME = "기본 그룹";
+const MEMORIZE_MIN_DISPLAY_SECONDS = 1;
+const MEMORIZE_MAX_DISPLAY_SECONDS = 10;
+const MEMORIZE_DEFAULT_DISPLAY_SECONDS = 3;
+const MEMORIZE_ANSWER_SECONDS = 3;
+const MEMORIZE_ANSWER_MS = MEMORIZE_ANSWER_SECONDS * 1000;
 const TAB_ROUTES: Record<TabKey, string> = {
   test: "/test",
+  memorize: "/memorize",
   add: "/wordbooks/new",
   mypage: "/me",
   groups: "/groups",
@@ -254,21 +278,31 @@ function render(): void {
     return;
   }
 
-  const isTesting = Boolean(activeTest);
+  const isSessionActive = Boolean(activeTest || activeMemorize);
   app.innerHTML = `
-    <div class="app-shell ${isTesting ? "is-testing" : ""} ${isSidebarOpen ? "sidebar-open" : ""}">
-      ${isTesting ? "" : renderAppBar()}
-      ${isTesting ? "" : renderSidebar()}
-      ${!isTesting && isSidebarOpen ? `<button class="sidebar-backdrop" id="sidebar-backdrop" type="button" aria-label="메뉴 닫기"></button>` : ""}
-      <main class="main ${isTesting ? "test-main" : ""}">
+    <div class="app-shell ${isSessionActive ? "is-testing" : ""} ${isSidebarOpen ? "sidebar-open" : ""}">
+      ${isSessionActive ? "" : renderAppBar()}
+      ${isSessionActive ? "" : renderSidebar()}
+      ${!isSessionActive && isSidebarOpen ? `<button class="sidebar-backdrop" id="sidebar-backdrop" type="button" aria-label="메뉴 닫기"></button>` : ""}
+      <main class="main ${isSessionActive ? "test-main" : ""}">
         ${toastMessage ? `<div class="toast" role="status">${escapeHtml(toastMessage)}</div>` : ""}
         ${renderTopActions()}
-        ${activeTest ? renderActiveTest() : renderCurrentTab()}
+        ${renderMainContent()}
       </main>
     </div>
   `;
 
   bindEvents();
+}
+
+function renderMainContent(): string {
+  if (activeTest) {
+    return renderActiveTest();
+  }
+  if (activeMemorize) {
+    return renderActiveMemorize();
+  }
+  return renderCurrentTab();
 }
 
 function renderAuthPage(): string {
@@ -367,6 +401,7 @@ function renderSidebar(): string {
 
       <nav class="nav-tabs" aria-label="주요 메뉴">
         ${renderNavButton("test", "테스트")}
+        ${renderNavButton("memorize", "암기")}
         ${renderNavButton("add", "추가")}
         ${renderNavButton("mypage", "내 페이지")}
         ${renderNavButton("manage", "관리")}
@@ -396,7 +431,7 @@ function renderSidebar(): string {
 }
 
 function renderTopActions(): string {
-  if (!activeTest) {
+  if (!activeTest && !activeMemorize) {
     return "";
   }
 
@@ -432,6 +467,9 @@ function renderSidebarGroup(section: WordbookGroup): string {
 }
 
 function renderCurrentTab(): string {
+  if (page === "memorize") {
+    return renderMemorizeTab();
+  }
   if (page === "add") {
     return renderAddTab();
   }
@@ -451,6 +489,69 @@ function renderCurrentTab(): string {
     return renderAnswerDetailPage();
   }
   return renderTestTab();
+}
+
+function renderMemorizeTab(): string {
+  const selected = selectedWordbook();
+  return `
+    <section class="page-header">
+      <div>
+        <p class="eyebrow">단어 외우기</p>
+        <h2>${selected ? escapeHtml(selected.name) : "단어장을 선택하세요"}</h2>
+      </div>
+      <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
+    </section>
+
+    <section class="work-grid memorize-grid">
+      <form class="panel test-panel" id="memorize-form">
+        <label class="field">
+          <span>단어장 선택</span>
+          <select name="wordbookId" id="wordbook-select" ${wordbooks.length ? "" : "disabled"}>
+            ${renderWordbookSelectOptions()}
+          </select>
+        </label>
+
+        <label class="field">
+          <span>단어 표시 시간</span>
+          <select name="displaySeconds">
+            ${range(MEMORIZE_MIN_DISPLAY_SECONDS, MEMORIZE_MAX_DISPLAY_SECONDS).map((seconds) => `<option value="${seconds}" ${seconds === MEMORIZE_DEFAULT_DISPLAY_SECONDS ? "selected" : ""}>${seconds}초</option>`).join("")}
+          </select>
+        </label>
+
+        <fieldset class="segmented memorize-segmented">
+          <legend>표시 언어</legend>
+          ${renderMemorizeModeOption("en", "영어", true)}
+          ${renderMemorizeModeOption("ko", "한국어")}
+          ${renderMemorizeModeOption("both", "둘다")}
+        </fieldset>
+
+        <button class="primary-button" type="submit" ${selected ? "" : "disabled"}>${isBusy ? "준비 중..." : "암기 시작"}</button>
+      </form>
+
+      <section class="panel detail-panel">
+        <div class="metric-row">
+          <div>
+            <span class="metric-value">${selected?.wordCount ?? 0}</span>
+            <span class="metric-label">암기 단어</span>
+          </div>
+          <div>
+            <span class="metric-value">${MEMORIZE_ANSWER_SECONDS}</span>
+            <span class="metric-label">뜻 표시 초</span>
+          </div>
+        </div>
+        ${selected ? renderBookDetail(selected) : `<div class="empty-note">암기할 단어장을 추가하세요.</div>`}
+      </section>
+    </section>
+  `;
+}
+
+function renderMemorizeModeOption(value: MemorizeDisplayMode, label: string, checked = false): string {
+  return `
+    <label class="segment">
+      <input type="radio" name="mode" value="${value}" ${checked ? "checked" : ""} />
+      <span>${label}</span>
+    </label>
+  `;
 }
 
 function renderTestTab(): string {
@@ -1073,6 +1174,51 @@ function renderActiveTest(): string {
   `;
 }
 
+function renderActiveMemorize(): string {
+  if (!activeMemorize) {
+    return "";
+  }
+
+  if (activeMemorize.phase === "done") {
+    return `
+      <section class="test-stage is-simple">
+        <div class="stage-center">
+          <p class="eyebrow">완료</p>
+          <h2>단어장을 끝까지 봤습니다.</h2>
+        </div>
+      </section>
+    `;
+  }
+
+  const word = activeMemorize.words[activeMemorize.currentIndex];
+  const progress = `${activeMemorize.currentIndex + 1} / ${activeMemorize.words.length}`;
+  const durationMs = activeMemorize.phase === "answer" ? MEMORIZE_ANSWER_MS : activeMemorize.displaySeconds * 1000;
+  const progressPercent = Math.round(((activeMemorize.currentIndex + 1) / activeMemorize.words.length) * 100);
+  const timePercent = Math.max(0, Math.min(100, (activeMemorize.remainingMs / durationMs) * 100));
+  const secondsLeft = Math.ceil(activeMemorize.remainingMs / 1000);
+  const prompt = memorizePromptFor(word, activeMemorize.mode);
+  const answer = memorizeAnswerFor(word, activeMemorize.mode);
+
+  return `
+    <section class="test-stage memorize-stage">
+      <div class="stage-top">
+        <span>${escapeHtml(activeMemorize.wordbookName)} · ${progress}</span>
+        <span>${secondsLeft}s</span>
+      </div>
+      <div class="progress"><span style="width: ${progressPercent}%"></span></div>
+      <div class="stage-center memorize-center">
+        <div class="memory-card ${activeMemorize.phase === "answer" ? "is-answer" : ""}">
+          <div class="prompt-word memory-prompt">${escapeHtml(prompt)}</div>
+          ${activeMemorize.phase === "answer" ? `<div class="memory-answer">${escapeHtml(answer)}</div>` : ""}
+        </div>
+      </div>
+      <div class="time-gauge" aria-label="남은 시간">
+        <span style="width: ${timePercent}%"></span>
+      </div>
+    </section>
+  `;
+}
+
 function bindEvents(): void {
   if (!currentUser) {
     bindAuthEvents();
@@ -1147,12 +1293,21 @@ function bindEvents(): void {
   });
 
   document.querySelector<HTMLButtonElement>("#stop-test-button")?.addEventListener("click", () => {
+    if (activeMemorize) {
+      abortActiveMemorize();
+      return;
+    }
     void abortActiveTest();
   });
 
   document.querySelector<HTMLFormElement>("#start-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void beginTest(new FormData(event.currentTarget as HTMLFormElement));
+  });
+
+  document.querySelector<HTMLFormElement>("#memorize-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void beginMemorize(new FormData(event.currentTarget as HTMLFormElement));
   });
 
   document.querySelector<HTMLFormElement>("#upload-form")?.addEventListener("submit", (event) => {
@@ -1367,6 +1522,7 @@ function resetAuthenticatedState(): void {
   selectedResult = null;
   selectedResultId = "";
   activeTest = null;
+  activeMemorize = null;
   clearTimer();
 }
 
@@ -1393,6 +1549,42 @@ async function beginTest(formData: FormData): Promise<void> {
       })
     });
     startCountdown(result);
+  });
+}
+
+async function beginMemorize(formData: FormData): Promise<void> {
+  const formWordbookId = String(formData.get("wordbookId") ?? "");
+  if (formWordbookId) {
+    selectedWordbookId = formWordbookId;
+  }
+
+  if (!selectedWordbookId) {
+    showToast("단어장을 선택하세요.");
+    return;
+  }
+
+  const displaySeconds = Number(formData.get("displaySeconds"));
+  if (!Number.isInteger(displaySeconds) || displaySeconds < MEMORIZE_MIN_DISPLAY_SECONDS || displaySeconds > MEMORIZE_MAX_DISPLAY_SECONDS) {
+    showToast(`표시 시간은 ${MEMORIZE_MIN_DISPLAY_SECONDS}초 이상 ${MEMORIZE_MAX_DISPLAY_SECONDS}초 이하만 가능합니다.`);
+    return;
+  }
+
+  const mode = parseMemorizeMode(formData.get("mode"));
+  await withBusy(async () => {
+    const wordbook = await api<WordbookDetail>(`/api/wordbooks/${selectedWordbookId}`);
+    const words = shuffleWords(wordbook.words);
+    if (!words.length) {
+      showToast("암기할 단어가 없습니다.");
+      return;
+    }
+
+    startMemorize({
+      wordbookId: wordbook.id,
+      wordbookName: wordbook.name,
+      words,
+      displaySeconds,
+      mode
+    });
   });
 }
 
@@ -1556,6 +1748,15 @@ async function goHome(): Promise<void> {
     return;
   }
 
+  if (activeMemorize) {
+    const confirmed = window.confirm("암기를 중단하고 홈으로 돌아갈까요?");
+    if (!confirmed) {
+      return;
+    }
+    abortActiveMemorize();
+    return;
+  }
+
   selectedResult = null;
   selectedResultId = "";
   clearToast();
@@ -1657,6 +1858,103 @@ async function abortActiveTest(): Promise<void> {
   navigateToTab("test", true);
 }
 
+function startMemorize(input: Omit<ActiveMemorize, "phase" | "currentIndex" | "remainingMs">): void {
+  clearTimer();
+  activeTest = null;
+  activeMemorize = {
+    ...input,
+    phase: "prompt",
+    currentIndex: 0,
+    remainingMs: input.displaySeconds * 1000
+  };
+  render();
+  scheduleMemorizePrompt(0);
+}
+
+function scheduleMemorizePrompt(index: number): void {
+  if (!activeMemorize) {
+    return;
+  }
+
+  if (index >= activeMemorize.words.length) {
+    finishActiveMemorize();
+    return;
+  }
+
+  clearTimer();
+  activeMemorize.phase = "prompt";
+  activeMemorize.currentIndex = index;
+  activeMemorize.remainingMs = activeMemorize.displaySeconds * 1000;
+  render();
+
+  runMemorizeTimer(activeMemorize.remainingMs, () => {
+    scheduleMemorizeAnswer(index);
+  });
+}
+
+function scheduleMemorizeAnswer(index: number): void {
+  if (!activeMemorize) {
+    return;
+  }
+
+  clearTimer();
+  activeMemorize.phase = "answer";
+  activeMemorize.currentIndex = index;
+  activeMemorize.remainingMs = MEMORIZE_ANSWER_MS;
+  render();
+
+  runMemorizeTimer(MEMORIZE_ANSWER_MS, () => {
+    scheduleMemorizePrompt(index + 1);
+  });
+}
+
+function runMemorizeTimer(durationMs: number, onDone: () => void): void {
+  const endAt = Date.now() + durationMs;
+  timer = window.setInterval(() => {
+    if (!activeMemorize) {
+      clearTimer();
+      return;
+    }
+
+    activeMemorize.remainingMs = Math.max(0, endAt - Date.now());
+    if (activeMemorize.remainingMs <= 0) {
+      clearTimer();
+      onDone();
+      return;
+    }
+
+    render();
+  }, 100);
+}
+
+function finishActiveMemorize(): void {
+  if (!activeMemorize) {
+    return;
+  }
+
+  clearTimer();
+  activeMemorize.phase = "done";
+  render();
+  window.setTimeout(() => {
+    if (activeMemorize?.phase === "done") {
+      activeMemorize = null;
+      showToast("암기를 완료했습니다.");
+      navigateToTab("memorize", true);
+    }
+  }, 1200);
+}
+
+function abortActiveMemorize(): void {
+  if (!activeMemorize) {
+    return;
+  }
+
+  clearTimer();
+  activeMemorize = null;
+  showToast("암기를 중단했습니다.");
+  navigateToTab("memorize", true);
+}
+
 function navigateToTab(nextTab: TabKey, replace = false): void {
   navigateToPath(TAB_ROUTES[nextTab], replace);
 }
@@ -1726,6 +2024,9 @@ function parseRoute(pathname: string): { page: PageKey; resultId?: string } {
 
   if (segments.length === 0 || segments[0] === "test") {
     return { page: "test" };
+  }
+  if (segments[0] === "memorize") {
+    return { page: "memorize" };
   }
   if (segments[0] === "wordbooks" && segments[1] === "new") {
     return { page: "add" };
@@ -1978,6 +2279,42 @@ function sourceLabel(source: WordbookSummary["source"]): string {
   return "업로드";
 }
 
+function parseMemorizeMode(value: FormDataEntryValue | null): MemorizeDisplayMode {
+  if (value === "ko" || value === "both") {
+    return value;
+  }
+  return "en";
+}
+
+function memorizePromptFor(word: WordEntry, mode: MemorizeDisplayMode): string {
+  if (mode === "ko") {
+    return word.korean;
+  }
+  if (mode === "both") {
+    return `${word.english} / ${word.korean}`;
+  }
+  return word.english;
+}
+
+function memorizeAnswerFor(word: WordEntry, mode: MemorizeDisplayMode): string {
+  if (mode === "ko") {
+    return word.english;
+  }
+  if (mode === "both") {
+    return `${word.english} / ${word.korean}`;
+  }
+  return word.korean;
+}
+
+function shuffleWords(words: WordEntry[]): WordEntry[] {
+  const copy = [...words];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
+}
+
 function modeLabel(mode: TestMode): string {
   if (mode === "ko") {
     return "한글";
@@ -2006,6 +2343,9 @@ function pageLabel(value: PageKey): string {
 function tabLabel(value: TabKey): string {
   if (value === "add") {
     return "추가";
+  }
+  if (value === "memorize") {
+    return "암기";
   }
   if (value === "manage") {
     return "관리";
