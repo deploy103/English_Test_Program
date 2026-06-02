@@ -316,9 +316,9 @@ function renderAuthPage(): string {
       ${toastMessage ? `<div class="toast" role="status">${escapeHtml(toastMessage)}</div>` : ""}
       <section class="auth-panel">
         <div class="auth-brand">
-          <div class="brand-mark">WT</div>
+          <div class="brand-mark">VS</div>
           <div>
-            <h1>Word Test</h1>
+            <h1>Voca Studio</h1>
             <p>로그인 후 내 단어장을 관리하세요.</p>
           </div>
         </div>
@@ -388,7 +388,7 @@ function renderAppBar(): string {
         <span></span>
       </button>
       <div class="app-title">
-        <strong>Word Test</strong>
+        <strong>Voca Studio</strong>
         <span>${pageLabel(page)} · ${wordbooks.length}개 단어장</span>
       </div>
       <div class="app-actions">
@@ -403,22 +403,22 @@ function renderSidebar(): string {
   return `
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">WT</div>
+        <div class="brand-mark">VS</div>
         <div>
-          <h1>Word Test</h1>
+          <h1>Voca Studio</h1>
           <p>${escapeHtml(currentUser?.name ?? "")} · ${currentUser?.role === "admin" ? "관리자" : "사용자"}</p>
         </div>
         <button class="icon-button close-button" id="close-menu-button" type="button" aria-label="메뉴 닫기">×</button>
       </div>
 
       <nav class="nav-tabs" aria-label="주요 메뉴">
-        ${renderNavButton("test", "테스트")}
-        ${renderNavButton("memorize", "암기")}
-        ${renderNavButton("add", "추가")}
-        ${renderNavButton("mypage", "내 페이지")}
-        ${renderNavButton("manage", "관리")}
-        ${renderNavButton("groups", "그룹관리")}
-        ${renderNavButton("answers", "정답지")}
+        ${renderNavButton("test", "퀴즈")}
+        ${renderNavButton("memorize", "암기 모드")}
+        ${renderNavButton("add", "새 단어장")}
+        ${renderNavButton("mypage", "계정")}
+        ${renderNavButton("manage", "단어장")}
+        ${renderNavButton("groups", "그룹")}
+        ${renderNavButton("answers", "기록")}
       </nav>
 
       <section class="side-section account-section">
@@ -508,8 +508,8 @@ function renderMemorizeTab(): string {
   return `
     <section class="page-header">
       <div>
-        <p class="eyebrow">단어 외우기</p>
-        <h2>${selected ? escapeHtml(selected.name) : "단어장을 선택하세요"}</h2>
+        <p class="eyebrow">암기 모드</p>
+        <h2>${selected ? escapeHtml(selected.name) : "학습할 단어장을 선택하세요"}</h2>
       </div>
       <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
     </section>
@@ -524,34 +524,34 @@ function renderMemorizeTab(): string {
         </label>
 
         <label class="field">
-          <span>단어 표시 시간</span>
+          <span>앞면 표시 시간</span>
           <select name="displaySeconds">
             ${range(MEMORIZE_MIN_DISPLAY_SECONDS, MEMORIZE_MAX_DISPLAY_SECONDS).map((seconds) => `<option value="${seconds}" ${seconds === MEMORIZE_DEFAULT_DISPLAY_SECONDS ? "selected" : ""}>${seconds}초</option>`).join("")}
           </select>
         </label>
 
         <fieldset class="segmented memorize-segmented">
-          <legend>표시 언어</legend>
+          <legend>앞면 구성</legend>
           ${renderMemorizeModeOption("en", "영어", true)}
           ${renderMemorizeModeOption("ko", "한국어")}
-          ${renderMemorizeModeOption("both", "둘다")}
+          ${renderMemorizeModeOption("both", "둘 다")}
         </fieldset>
 
-        <button class="primary-button" type="submit" ${selected ? "" : "disabled"}>${isBusy ? "준비 중..." : "암기 시작"}</button>
+        <button class="primary-button" type="submit" ${selected ? "" : "disabled"}>${isBusy ? "준비 중..." : "세션 시작"}</button>
       </form>
 
       <section class="panel detail-panel">
         <div class="metric-row">
           <div>
             <span class="metric-value">${selected?.wordCount ?? 0}</span>
-            <span class="metric-label">암기 단어</span>
+            <span class="metric-label">학습 단어</span>
           </div>
           <div>
             <span class="metric-value">${MEMORIZE_ANSWER_SECONDS}</span>
-            <span class="metric-label">뜻 표시 초</span>
+            <span class="metric-label">해설 표시 초</span>
           </div>
         </div>
-        ${selected ? renderBookDetail(selected) : `<div class="empty-note">암기할 단어장을 추가하세요.</div>`}
+        ${selected ? renderBookDetail(selected) : `<div class="empty-note">먼저 단어장을 추가한 뒤 암기 세션을 시작하세요.</div>`}
       </section>
     </section>
   `;
@@ -571,7 +571,7 @@ function renderTestTab(): string {
   return `
     <section class="page-header">
       <div>
-        <p class="eyebrow">새 테스트</p>
+        <p class="eyebrow">퀴즈 설정</p>
         <h2>${selected ? escapeHtml(selected.name) : "단어장을 추가하세요"}</h2>
       </div>
       <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
@@ -607,7 +607,7 @@ function renderTestTab(): string {
           </select>
         </label>
 
-        <button class="primary-button" type="submit" ${selected ? "" : "disabled"}>${isBusy ? "시작 중..." : "테스트 시작"}</button>
+        <button class="primary-button" type="submit" ${selected ? "" : "disabled"}>${isBusy ? "시작 중..." : "퀴즈 시작"}</button>
       </form>
 
       <section class="panel detail-panel">
@@ -618,7 +618,7 @@ function renderTestTab(): string {
           </div>
           <div>
             <span class="metric-value">${results.length}</span>
-            <span class="metric-label">정답지</span>
+            <span class="metric-label">학습 기록</span>
           </div>
         </div>
         ${selected ? renderBookDetail(selected) : `<div class="empty-note">단어장을 새로 추가하세요.</div>`}
@@ -656,11 +656,11 @@ function renderAddTab(): string {
   return `
     <section class="page-header">
       <div>
-        <p class="eyebrow">단어장 추가</p>
-        <h2>서버 저장 단어장</h2>
+        <p class="eyebrow">새 단어장</p>
+        <h2>단어장을 만들어 저장하세요</h2>
       </div>
       <div class="header-actions">
-        <button class="ghost-button" data-tab="groups" type="button">그룹관리</button>
+        <button class="ghost-button" data-tab="groups" type="button">그룹</button>
         <a class="ghost-button" href="/examples/wordbook-example.json" download>JSON 예시 다운로드</a>
       </div>
     </section>
@@ -729,7 +729,7 @@ function renderMyPageTab(): string {
   return `
     <section class="page-header">
       <div>
-        <p class="eyebrow">내 페이지</p>
+        <p class="eyebrow">계정</p>
         <h2>${escapeHtml(user.name)}</h2>
       </div>
       <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
@@ -761,11 +761,11 @@ function renderMyPageTab(): string {
       </form>
 
       <section class="panel management-panel">
-        <h3>관리</h3>
+        <h3>바로가기</h3>
         <div class="management-actions">
-          <button class="ghost-button" data-tab="manage" type="button">단어장 관리</button>
-          <button class="ghost-button" data-tab="groups" type="button">그룹관리</button>
-          <button class="primary-button" data-tab="add" type="button">단어장 추가</button>
+          <button class="ghost-button" data-tab="manage" type="button">단어장</button>
+          <button class="ghost-button" data-tab="groups" type="button">그룹</button>
+          <button class="primary-button" data-tab="add" type="button">새 단어장</button>
         </div>
       </section>
     </section>
@@ -894,7 +894,7 @@ function renderManageTab(): string {
   return `
     <section class="page-header">
       <div>
-        <p class="eyebrow">단어장 관리</p>
+        <p class="eyebrow">단어장</p>
         <h2>${wordbooks.length ? "저장된 단어장" : "단어장이 없습니다"}</h2>
       </div>
       <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
@@ -919,8 +919,8 @@ function renderManageTab(): string {
           </div>
         </div>
         <div class="stacked-actions">
-          <button class="primary-button" data-tab="add" type="button">단어장 추가</button>
-          <button class="ghost-button" data-tab="groups" type="button">그룹관리</button>
+          <button class="primary-button" data-tab="add" type="button">새 단어장</button>
+          <button class="ghost-button" data-tab="groups" type="button">그룹</button>
         </div>
       </div>
 
@@ -953,7 +953,7 @@ function renderManageItem(book: WordbookSummary): string {
         ${book.description ? `<p class="muted">${escapeHtml(book.description)}</p>` : ""}
       </div>
       <div class="manage-actions">
-        <button class="ghost-button" data-use-wordbook-id="${book.id}" type="button">테스트</button>
+        <button class="ghost-button" data-use-wordbook-id="${book.id}" type="button">퀴즈</button>
         <button class="danger-button" data-delete-wordbook-id="${book.id}" type="button">삭제</button>
       </div>
     </article>
@@ -964,7 +964,7 @@ function renderGroupsTab(): string {
   return `
     <section class="page-header">
       <div>
-        <p class="eyebrow">그룹관리</p>
+        <p class="eyebrow">그룹</p>
         <h2>${groups.length ? "단어장 그룹" : "그룹을 추가하세요"}</h2>
       </div>
       <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
@@ -1012,8 +1012,8 @@ function renderAnswersTab(): string {
   return `
     <section class="page-header">
       <div>
-        <p class="eyebrow">정답지</p>
-        <h2>${results.length ? `${results.length}개 저장됨` : "저장된 정답지"}</h2>
+        <p class="eyebrow">학습 기록</p>
+        <h2>${results.length ? `${results.length}개 저장됨` : "저장된 기록"}</h2>
       </div>
       <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
     </section>
@@ -1023,7 +1023,7 @@ function renderAnswersTab(): string {
         <div class="answer-index-top">
           <div>
             <p class="eyebrow">최근순</p>
-            <h3>${results.length ? "정답지 목록" : "정답지 없음"}</h3>
+            <h3>${results.length ? "기록 목록" : "기록 없음"}</h3>
           </div>
           ${results[0] ? `<span>${formatDate(results[0].createdAt)}</span>` : ""}
         </div>
@@ -1031,7 +1031,7 @@ function renderAnswersTab(): string {
           <div class="answer-list answer-list-full">
             ${results.map(renderResultItem).join("")}
           </div>
-        ` : `<div class="empty-note">아직 정답지가 없습니다.</div>`}
+        ` : `<div class="empty-note">아직 저장된 학습 기록이 없습니다.</div>`}
       </div>
     </section>
   `;
@@ -1044,8 +1044,8 @@ function renderAnswerDetailPage(): string {
   return `
     <section class="page-header">
       <div>
-        <p class="eyebrow">정답지 상세</p>
-        <h2>${result ? escapeHtml(result.wordbookName) : "정답지"}</h2>
+        <p class="eyebrow">기록 상세</p>
+        <h2>${result ? escapeHtml(result.wordbookName) : "학습 기록"}</h2>
       </div>
       <div class="header-actions">
         <a class="ghost-button" href="${TAB_ROUTES.answers}" data-route>목록</a>
@@ -1056,10 +1056,10 @@ function renderAnswerDetailPage(): string {
     <section class="answer-detail-layout">
       <article class="panel answer-detail">
         ${isAnswerLoading
-          ? `<div class="empty-note">정답지를 불러오는 중입니다.</div>`
+          ? `<div class="empty-note">학습 기록을 불러오는 중입니다.</div>`
           : result
             ? renderResultDetail(result)
-            : `<div class="empty-note">정답지를 선택하세요.</div>`}
+            : `<div class="empty-note">확인할 기록을 선택하세요.</div>`}
       </article>
     </section>
   `;
@@ -1157,7 +1157,7 @@ function renderActiveTest(): string {
       <section class="test-stage is-simple">
         <div class="stage-center">
           <p class="eyebrow">완료</p>
-          <h2>정답지를 저장했습니다.</h2>
+          <h2>학습 기록을 저장했습니다.</h2>
         </div>
       </section>
     `;
@@ -1724,7 +1724,7 @@ async function loadResultDetail(id: string): Promise<void> {
     }
     selectedResult = null;
     selectedResultId = "";
-    showToast(error instanceof Error ? error.message : "정답지를 불러오지 못했습니다.");
+    showToast(error instanceof Error ? error.message : "학습 기록을 불러오지 못했습니다.");
     navigateToTab("answers", true);
   } finally {
     if (requestToken === answerRequestToken) {
@@ -1757,7 +1757,7 @@ async function deleteWordbookById(id: string): Promise<void> {
 
 async function goHome(): Promise<void> {
   if (activeTest) {
-    const confirmed = window.confirm("테스트를 중단하고 홈으로 돌아갈까요?");
+    const confirmed = window.confirm("퀴즈를 중단하고 홈으로 돌아갈까요?");
     if (!confirmed) {
       return;
     }
@@ -1857,7 +1857,7 @@ async function finishActiveTest(): Promise<void> {
   selectedResult = completed;
   selectedResultId = completed.id;
   activeTest = null;
-  showToast("정답지를 저장했습니다.");
+  showToast("학습 기록을 저장했습니다.");
   await refreshAll();
   navigateToAnswerDetail(completed.id, true);
 }
@@ -1870,7 +1870,7 @@ async function abortActiveTest(nextTab: TabKey = "test", replace = true): Promis
   const resultId = activeTest.result.id;
   clearTimer();
   activeTest = null;
-  showToast("테스트를 중단했습니다.");
+  showToast("퀴즈를 중단했습니다.");
   render();
   await api<void>(`/api/results/${resultId}`, { method: "DELETE" }).catch(() => undefined);
   await refreshAll();
@@ -2405,10 +2405,10 @@ function tabForPage(value: PageKey): TabKey {
 
 function pageLabel(value: PageKey): string {
   if (value === "answerDetail") {
-    return "정답지 상세";
+    return "기록 상세";
   }
   if (value === "testPlay") {
-    return "테스트 진행";
+    return "퀴즈 진행";
   }
   if (value === "memorizePlay") {
     return "암기 진행";
@@ -2418,24 +2418,24 @@ function pageLabel(value: PageKey): string {
 
 function tabLabel(value: TabKey): string {
   if (value === "add") {
-    return "추가";
+    return "새 단어장";
   }
   if (value === "memorize") {
-    return "암기";
+    return "암기 모드";
   }
   if (value === "manage") {
-    return "관리";
+    return "단어장";
   }
   if (value === "mypage") {
-    return "내 페이지";
+    return "계정";
   }
   if (value === "groups") {
-    return "그룹관리";
+    return "그룹";
   }
   if (value === "answers") {
-    return "정답지";
+    return "기록";
   }
-  return "테스트";
+  return "퀴즈";
 }
 
 function formatDate(value: string): string {
