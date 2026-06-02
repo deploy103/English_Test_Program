@@ -88,7 +88,9 @@ interface AuthedRequest extends Request {
 
 app.disable("x-powered-by");
 app.use(securityHeaders);
+app.use(rejectCrossSiteWrites);
 app.use(rejectCrossOriginWrites);
+app.use("/api", rejectUnsupportedApiContentType);
 app.use(express.json({ limit: "2mb" }));
 app.use("/api", (_request, response, next) => {
   response.setHeader("Cache-Control", "no-store");
@@ -394,18 +396,49 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Word Test server listening on http://localhost:${PORT}`);
+  console.log(`Voca Studio server listening on http://localhost:${PORT}`);
 });
 
-function securityHeaders(_request: Request, response: Response, next: NextFunction): void {
+function securityHeaders(request: Request, response: Response, next: NextFunction): void {
   response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("X-DNS-Prefetch-Control", "off");
+  response.setHeader("X-Permitted-Cross-Domain-Policies", "none");
   response.setHeader("Referrer-Policy", "same-origin");
   response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  response.setHeader("Origin-Agent-Cluster", "?1");
+  if (isHttpsRequest(request)) {
+    response.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+  }
   response.setHeader(
     "Content-Security-Policy",
     "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
   );
   next();
+}
+
+function rejectCrossSiteWrites(request: Request, response: Response, next: NextFunction): void {
+  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+    next();
+    return;
+  }
+
+  const fetchSite = request.get("sec-fetch-site");
+  if (!fetchSite || fetchSite === "same-origin" || fetchSite === "same-site" || fetchSite === "none") {
+    next();
+    return;
+  }
+
+  void appendAuditLog({
+    event: "security.fetch_metadata_reject",
+    result: "failure",
+    ipAddress: requestMetaFrom(request).ipAddress,
+    userAgent: requestMetaFrom(request).userAgent,
+    message: `sec-fetch-site=${fetchSite}`
+  });
+  response.status(403).json({ message: "허용되지 않은 요청 출처입니다." });
 }
 
 function rejectCrossOriginWrites(request: Request, response: Response, next: NextFunction): void {
@@ -428,6 +461,34 @@ function rejectCrossOriginWrites(request: Request, response: Response, next: Nex
   }
 
   next();
+}
+
+function rejectUnsupportedApiContentType(request: Request, response: Response, next: NextFunction): void {
+  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+    next();
+    return;
+  }
+
+  const contentType = request.get("content-type");
+  if (!contentType) {
+    next();
+    return;
+  }
+
+  const mimeType = contentType.split(";")[0].trim().toLowerCase();
+  if (mimeType === "application/json" || mimeType === "multipart/form-data") {
+    next();
+    return;
+  }
+
+  void appendAuditLog({
+    event: "security.content_type_reject",
+    result: "failure",
+    ipAddress: requestMetaFrom(request).ipAddress,
+    userAgent: requestMetaFrom(request).userAgent,
+    message: `content-type=${contentType}`
+  });
+  response.status(415).json({ message: "지원하지 않는 요청 형식입니다." });
 }
 
 function rateLimitAuth(request: Request, response: Response, next: NextFunction): void {
@@ -533,6 +594,11 @@ function isAllowedWriteOrigin(origin: string, request: Request): boolean {
 
   try {
     const originUrl = new URL(origin);
+    const normalizedOrigin = normalizedHttpOrigin(originUrl);
+    if (normalizedOrigin && configuredWriteOrigins().has(normalizedOrigin)) {
+      return true;
+    }
+
     return (
       originUrl.host === host &&
       (originUrl.protocol === "http:" || originUrl.protocol === "https:")
@@ -540,6 +606,46 @@ function isAllowedWriteOrigin(origin: string, request: Request): boolean {
   } catch {
     return false;
   }
+}
+
+function configuredWriteOrigins(): Set<string> {
+  const rawValues = [
+    process.env.APP_ORIGIN,
+    ...(process.env.APP_ORIGINS?.split(",") ?? [])
+  ];
+  return new Set(rawValues
+    .map((value) => normalizeConfiguredOrigin(value))
+    .filter((value): value is string => Boolean(value)));
+}
+
+function normalizeConfiguredOrigin(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    return normalizedHttpOrigin(new URL(value.trim()));
+  } catch {
+    return null;
+  }
+}
+
+function normalizedHttpOrigin(url: URL): string | null {
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return null;
+  }
+  return `${url.protocol}//${url.host}`;
+}
+
+function isHttpsRequest(request: Request): boolean {
+  return (
+    request.secure ||
+    (process.env.TRUST_PROXY === "1" && firstForwardedValue(request.get("x-forwarded-proto")) === "https") ||
+    process.env.COOKIE_SECURE === "1"
+  );
+}
+
+function firstForwardedValue(value: string | undefined): string | undefined {
+  return value?.split(",")[0]?.trim().toLowerCase();
 }
 
 function parserErrorStatus(error: unknown): number | null {
