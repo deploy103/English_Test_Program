@@ -5,6 +5,8 @@ import type {
   AdminWordbookSummary,
   AnswerEntry,
   AnswerFormat,
+  LibraryWordbookRecord,
+  LibraryWordbookSummary,
   ResultSummary,
   TestMode,
   TestResult,
@@ -24,6 +26,7 @@ const MAX_WORD_CELL_LENGTH = 200;
 
 export const DATA_DIR = path.resolve(process.env.WORD_TEST_DATA_DIR || DEFAULT_DATA_DIR);
 export const WORDBOOK_DIR = path.join(DATA_DIR, "wordbooks");
+export const LIBRARY_WORDBOOK_DIR = path.join(DATA_DIR, "library-wordbooks");
 export const GROUP_DIR = path.join(DATA_DIR, "groups");
 export const RESULT_DIR = path.join(DATA_DIR, "results");
 export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
@@ -42,6 +45,26 @@ interface UpdateWordbookInput {
   name?: string;
   group?: string;
   description?: string;
+}
+
+interface CreateLibraryWordbookInput {
+  name: string;
+  group?: string;
+  description?: string;
+  words: WordEntry[];
+}
+
+interface AssignLibraryWordbookInput {
+  libraryWordbookId: string;
+  targetUserId: string;
+}
+
+export interface OwnerLearningStats {
+  ownerId: string;
+  wordbookCount: number;
+  wordCount: number;
+  groupCount: number;
+  resultCount: number;
 }
 
 interface LoadedWordbookJson {
@@ -80,6 +103,7 @@ export async function initializeStorage(): Promise<void> {
 export async function ensureDataDirs(): Promise<void> {
   await Promise.all([
     fs.mkdir(WORDBOOK_DIR, { recursive: true }),
+    fs.mkdir(LIBRARY_WORDBOOK_DIR, { recursive: true }),
     fs.mkdir(GROUP_DIR, { recursive: true }),
     fs.mkdir(RESULT_DIR, { recursive: true }),
     fs.mkdir(UPLOAD_DIR, { recursive: true })
@@ -203,6 +227,122 @@ export async function getWordbookForAdmin(id: string): Promise<WordbookRecord> {
     throw new HttpError(404, "단어장을 찾을 수 없습니다.");
   }
   return record;
+}
+
+export async function listOwnerLearningStats(ownerIds: Iterable<string>): Promise<Map<string, OwnerLearningStats>> {
+  const owners = new Set([...ownerIds].filter(Boolean).map(normalizeOwnerId));
+  const stats = new Map<string, OwnerLearningStats>();
+  for (const ownerId of owners) {
+    stats.set(ownerId, {
+      ownerId,
+      wordbookCount: 0,
+      wordCount: 0,
+      groupCount: 0,
+      resultCount: 0
+    });
+  }
+
+  const [wordbookRecords, groupRecords, resultRecords] = await Promise.all([
+    readRecords<WordbookRecord>(WORDBOOK_DIR),
+    readRecords<WordbookGroupRecord>(GROUP_DIR),
+    readRecords<TestResult>(RESULT_DIR)
+  ]);
+
+  for (const wordbook of wordbookRecords) {
+    const entry = stats.get(wordbook.ownerId);
+    if (!entry) {
+      continue;
+    }
+    entry.wordbookCount += 1;
+    entry.wordCount += wordbook.words.length;
+  }
+
+  for (const group of groupRecords) {
+    const entry = stats.get(group.ownerId);
+    if (entry) {
+      entry.groupCount += 1;
+    }
+  }
+
+  for (const result of resultRecords) {
+    const entry = stats.get(result.ownerId);
+    if (entry) {
+      entry.resultCount += 1;
+    }
+  }
+
+  return stats;
+}
+
+export async function deleteOwnedDataForUser(ownerId: string): Promise<void> {
+  const owner = normalizeOwnerId(ownerId);
+  const [wordbookRecords, groupRecords, resultRecords] = await Promise.all([
+    readRecords<WordbookRecord>(WORDBOOK_DIR),
+    readRecords<WordbookGroupRecord>(GROUP_DIR),
+    readRecords<TestResult>(RESULT_DIR)
+  ]);
+
+  await Promise.all([
+    ...wordbookRecords
+      .filter((record) => record.ownerId === owner)
+      .map((record) => fs.rm(wordbookPath(record.id), { force: true })),
+    ...groupRecords
+      .filter((record) => record.ownerId === owner)
+      .map((record) => fs.rm(groupPath(record.id), { force: true })),
+    ...resultRecords
+      .filter((record) => record.ownerId === owner)
+      .map((record) => fs.rm(resultPath(record.id), { force: true }))
+  ]);
+}
+
+export async function listLibraryWordbooks(): Promise<LibraryWordbookSummary[]> {
+  const records = await readRecords<LibraryWordbookRecord>(LIBRARY_WORDBOOK_DIR);
+  return records
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map(summarizeLibraryWordbook);
+}
+
+export async function getLibraryWordbook(id: string): Promise<LibraryWordbookRecord> {
+  return readRecord<LibraryWordbookRecord>(libraryWordbookPath(id), "보관소 단어장을 찾을 수 없습니다.");
+}
+
+export async function createLibraryWordbook(input: CreateLibraryWordbookInput): Promise<LibraryWordbookSummary> {
+  const words = normalizeWords(input.words);
+  if (words.length === 0) {
+    badRequest("english/korean 단어가 1개 이상 필요합니다.");
+  }
+
+  const now = new Date().toISOString();
+  const record: LibraryWordbookRecord = {
+    id: crypto.randomUUID(),
+    name: normalizeName(input.name),
+    group: normalizeGroup(input.group),
+    description: normalizeDescription(input.description),
+    words,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  await writeJson(libraryWordbookPath(record.id), record);
+  return summarizeLibraryWordbook(record);
+}
+
+export async function deleteLibraryWordbook(id: string): Promise<void> {
+  await getLibraryWordbook(id);
+  await fs.rm(libraryWordbookPath(id), { force: true });
+}
+
+export async function assignLibraryWordbookToUser(input: AssignLibraryWordbookInput): Promise<WordbookSummary> {
+  const targetUserId = normalizeOwnerId(input.targetUserId);
+  const libraryWordbook = await getLibraryWordbook(input.libraryWordbookId);
+  return createWordbook({
+    ownerId: targetUserId,
+    name: libraryWordbook.name,
+    group: libraryWordbook.group,
+    description: libraryWordbook.description,
+    words: libraryWordbook.words,
+    source: "manual"
+  });
 }
 
 export async function listGroups(ownerId: string): Promise<WordbookGroupSummary[]> {
@@ -489,6 +629,18 @@ function summarizeWordbook(record: WordbookRecord): WordbookSummary {
   };
 }
 
+function summarizeLibraryWordbook(record: LibraryWordbookRecord): LibraryWordbookSummary {
+  return {
+    id: record.id,
+    name: record.name,
+    group: normalizeGroup(record.group),
+    description: record.description,
+    wordCount: record.words.length,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
+}
+
 async function readRecords<T>(dir: string): Promise<T[]> {
   const files = (await fs.readdir(dir).catch(() => [])).filter((file) => file.endsWith(".json"));
   const records: T[] = [];
@@ -572,6 +724,11 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
 function wordbookPath(id: string): string {
   assertSafeId(id);
   return path.join(WORDBOOK_DIR, `${id}.json`);
+}
+
+function libraryWordbookPath(id: string): string {
+  assertSafeId(id);
+  return path.join(LIBRARY_WORDBOOK_DIR, `${id}.json`);
 }
 
 function groupPath(id: string): string {
