@@ -162,6 +162,8 @@ export interface AnswerEntry {
   answer: string;
   promptLanguage: "english" | "korean";
   answerLanguage: "english" | "korean";
+  userAnswer?: string;
+  isCorrect?: boolean;
 }
 
 export interface TestResult {
@@ -172,6 +174,10 @@ export interface TestResult {
   questionCount: number;
   mode: TestMode;
   displaySeconds: number;
+  writingSeconds: number;
+  answerInputEnabled: boolean;
+  correctCount?: number;
+  scoredQuestionCount?: number;
   answers: AnswerEntry[];
   createdAt: string;
   completedAt?: string;
@@ -185,6 +191,10 @@ export interface ResultSummary {
   questionCount: number;
   mode: TestMode;
   displaySeconds: number;
+  writingSeconds: number;
+  answerInputEnabled: boolean;
+  correctCount?: number;
+  scoredQuestionCount?: number;
   createdAt: string;
   completedAt?: string;
 }
@@ -204,6 +214,9 @@ export interface ModeStats {
 export interface OverallLearningStats {
   testCount: number;
   questionCount: number;
+  correctCount: number;
+  scoredQuestionCount: number;
+  accuracyPercent: number;
   wordbookCount: number;
   averageQuestionsPerTest: number;
   averageDisplaySeconds: number;
@@ -217,6 +230,9 @@ export interface WordbookLearningStats {
   wordbookName: string;
   testCount: number;
   questionCount: number;
+  correctCount: number;
+  scoredQuestionCount: number;
+  accuracyPercent: number;
   averageQuestionsPerTest: number;
   averageDisplaySeconds: number;
   modeCounts: ModeStats;
