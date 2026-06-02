@@ -1,16 +1,22 @@
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 import type {
   AdminWordbookSummary,
   AnswerEntry,
   AnswerFormat,
+  DailyLearningStats,
+  LearningStats,
   LibraryWordbookRecord,
   LibraryWordbookSummary,
+  ModeStats,
+  OverallLearningStats,
   ResultSummary,
   TestMode,
   TestResult,
   WordEntry,
+  WordbookLearningStats,
   WordbookGroupRecord,
   WordbookGroupSummary,
   WordbookRecord,
@@ -20,9 +26,12 @@ import type {
 
 const DEFAULT_DATA_DIR = path.resolve(process.cwd(), "data");
 const DEFAULT_GROUP_NAME = "기본 그룹";
-const MAX_COMPLETED_RESULTS = 20;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_COMPLETED_RESULT_AGE_DAYS = 366;
 const MAX_WORDS_PER_BOOK = 5000;
 const MAX_WORD_CELL_LENGTH = 200;
+export const MAX_JSON_UPLOAD_BYTES = 2 * 1024 * 1024;
+const JSON_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 export const DATA_DIR = path.resolve(process.env.WORD_TEST_DATA_DIR || DEFAULT_DATA_DIR);
 export const WORDBOOK_DIR = path.join(DATA_DIR, "wordbooks");
@@ -80,6 +89,16 @@ interface StartTestInput {
   questionCount: number;
   mode: TestMode;
   displaySeconds: number;
+}
+
+interface WordbookStatsAccumulator {
+  wordbookId: string;
+  wordbookName: string;
+  testCount: number;
+  questionCount: number;
+  displaySecondsTotal: number;
+  modeCounts: ModeStats;
+  lastCompletedAt?: string;
 }
 
 export class HttpError extends Error {
@@ -519,6 +538,79 @@ export async function listResults(ownerId: string): Promise<ResultSummary[]> {
     }));
 }
 
+export async function getLearningStats(
+  ownerId: string,
+  range: LearningStats["range"],
+  fromInclusive: Date,
+  toExclusive: Date
+): Promise<LearningStats> {
+  const owner = normalizeOwnerId(ownerId);
+  const records = (await readRecords<TestResult>(RESULT_DIR))
+    .filter((result) => result.ownerId === owner && Boolean(result.completedAt))
+    .filter((result) => {
+      const completedAt = result.completedAt ?? result.createdAt;
+      return completedAt >= fromInclusive.toISOString() && completedAt < toExclusive.toISOString();
+    })
+    .sort((a, b) => (a.completedAt ?? a.createdAt).localeCompare(b.completedAt ?? b.createdAt));
+
+  const overall = emptyOverallStats();
+  const byWordbook = new Map<string, WordbookStatsAccumulator>();
+  const daily = new Map<string, DailyLearningStats>();
+  for (const date of datesBetween(fromInclusive, toExclusive)) {
+    daily.set(date, { date, testCount: 0, questionCount: 0 });
+  }
+
+  for (const result of records) {
+    const completedAt = result.completedAt ?? result.createdAt;
+    const questionCount = normalizedQuestionCount(result);
+    overall.testCount += 1;
+    overall.questionCount += questionCount;
+    overall.averageDisplaySeconds += result.displaySeconds;
+    overall.modeCounts[result.mode] += 1;
+    overall.firstCompletedAt = overall.firstCompletedAt ?? completedAt;
+    overall.lastCompletedAt = completedAt;
+
+    const date = completedAt.slice(0, 10);
+    const day = daily.get(date);
+    if (day) {
+      day.testCount += 1;
+      day.questionCount += questionCount;
+    }
+
+    const key = result.wordbookId;
+    const stats = byWordbook.get(key) ?? {
+      wordbookId: result.wordbookId,
+      wordbookName: result.wordbookName,
+      testCount: 0,
+      questionCount: 0,
+      displaySecondsTotal: 0,
+      modeCounts: emptyModeStats(),
+      lastCompletedAt: undefined
+    };
+    stats.testCount += 1;
+    stats.questionCount += questionCount;
+    stats.displaySecondsTotal += result.displaySeconds;
+    stats.modeCounts[result.mode] += 1;
+    stats.lastCompletedAt = completedAt;
+    byWordbook.set(key, stats);
+  }
+
+  overall.wordbookCount = byWordbook.size;
+  overall.averageQuestionsPerTest = average(overall.questionCount, overall.testCount);
+  overall.averageDisplaySeconds = average(overall.averageDisplaySeconds, overall.testCount);
+
+  const wordbooks = [...byWordbook.values()]
+    .map(finalizeWordbookStats)
+    .sort((a, b) => b.questionCount - a.questionCount || b.testCount - a.testCount || a.wordbookName.localeCompare(b.wordbookName, "ko-KR"));
+
+  return {
+    range,
+    overall,
+    wordbooks,
+    daily: [...daily.values()]
+  };
+}
+
 export async function getResult(id: string, ownerId: string): Promise<TestResult> {
   const owner = normalizeOwnerId(ownerId);
   const result = await readRecord<TestResult>(resultPath(id), "학습 기록을 찾을 수 없습니다.");
@@ -527,27 +619,12 @@ export async function getResult(id: string, ownerId: string): Promise<TestResult
 }
 
 async function pruneCompletedResults(ownerId?: string): Promise<void> {
-  const completedResults = (await readRecords<TestResult>(RESULT_DIR))
+  const cutoff = new Date(Date.now() - MAX_COMPLETED_RESULT_AGE_DAYS * DAY_MS).toISOString();
+  const removals = (await readRecords<TestResult>(RESULT_DIR))
     .filter((result) => Boolean(result.completedAt) && Boolean(result.ownerId))
-    .filter((result) => !ownerId || result.ownerId === ownerId);
-
-  const byOwner = new Map<string, TestResult[]>();
-  for (const result of completedResults) {
-    byOwner.set(result.ownerId, [...(byOwner.get(result.ownerId) ?? []), result]);
-  }
-
-  const removals: Promise<void>[] = [];
-  for (const records of byOwner.values()) {
-    if (records.length <= MAX_COMPLETED_RESULTS) {
-      continue;
-    }
-
-    const removeCount = records.length - MAX_COMPLETED_RESULTS;
-    const oldestResults = records
-      .sort((a, b) => resultStoredAt(a).localeCompare(resultStoredAt(b)) || a.id.localeCompare(b.id))
-      .slice(0, removeCount);
-    removals.push(...oldestResults.map((result) => fs.rm(resultPath(result.id), { force: true })));
-  }
+    .filter((result) => !ownerId || result.ownerId === ownerId)
+    .filter((result) => resultStoredAt(result) < cutoff)
+    .map((result) => fs.rm(resultPath(result.id), { force: true }));
 
   await Promise.all(removals);
 }
@@ -596,6 +673,53 @@ export function contentTypeFor(format: AnswerFormat): string {
 
 export function extensionFor(format: AnswerFormat): string {
   return format;
+}
+
+function emptyOverallStats(): OverallLearningStats {
+  return {
+    testCount: 0,
+    questionCount: 0,
+    wordbookCount: 0,
+    averageQuestionsPerTest: 0,
+    averageDisplaySeconds: 0,
+    modeCounts: emptyModeStats()
+  };
+}
+
+function emptyModeStats(): ModeStats {
+  return { en: 0, ko: 0, rand: 0 };
+}
+
+function finalizeWordbookStats(stats: WordbookStatsAccumulator): WordbookLearningStats {
+  return {
+    wordbookId: stats.wordbookId,
+    wordbookName: stats.wordbookName,
+    testCount: stats.testCount,
+    questionCount: stats.questionCount,
+    averageQuestionsPerTest: average(stats.questionCount, stats.testCount),
+    averageDisplaySeconds: average(stats.displaySecondsTotal, stats.testCount),
+    modeCounts: stats.modeCounts,
+    lastCompletedAt: stats.lastCompletedAt
+  };
+}
+
+function normalizedQuestionCount(result: TestResult): number {
+  return result.questionCount || result.answers.length;
+}
+
+function average(total: number, count: number): number {
+  if (!count) {
+    return 0;
+  }
+  return Math.round((total / count) * 10) / 10;
+}
+
+function datesBetween(fromInclusive: Date, toExclusive: Date): string[] {
+  const dates: string[] = [];
+  for (let cursor = new Date(fromInclusive); cursor < toExclusive; cursor = new Date(cursor.getTime() + DAY_MS)) {
+    dates.push(cursor.toISOString().slice(0, 10));
+  }
+  return dates;
 }
 
 export function sanitizeDownloadName(name: string): string {
@@ -705,8 +829,36 @@ async function readJson(filePath: string): Promise<unknown> {
 }
 
 async function readUploadedJson(filePath: string): Promise<unknown> {
+  const stats = await fs.stat(filePath);
+  if (!stats.isFile()) {
+    badRequest("업로드한 JSON 파일을 읽을 수 없습니다.");
+  }
+  if (stats.size === 0) {
+    badRequest("빈 JSON 파일은 업로드할 수 없습니다.");
+  }
+  if (stats.size > MAX_JSON_UPLOAD_BYTES) {
+    badRequest("JSON 파일은 2MB 이하만 업로드할 수 있습니다.");
+  }
+
+  const bytes = await fs.readFile(filePath);
+  if (bytes.includes(0)) {
+    badRequest("JSON 파일 내용이 올바르지 않습니다.");
+  }
+
+  let text: string;
   try {
-    return await readJson(filePath);
+    text = JSON_TEXT_DECODER.decode(bytes);
+  } catch {
+    badRequest("JSON 파일은 UTF-8 텍스트여야 합니다.");
+  }
+
+  const firstVisibleCharacter = text.trimStart().at(0);
+  if (firstVisibleCharacter !== "{" && firstVisibleCharacter !== "[") {
+    badRequest("JSON 파일 내용이 올바르지 않습니다.");
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
   } catch (error) {
     if (error instanceof SyntaxError) {
       badRequest("JSON 형식이 올바르지 않습니다.");
