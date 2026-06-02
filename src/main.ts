@@ -1278,12 +1278,14 @@ function renderActiveTest(): string {
         <span>${progress}</span>
         <span>${secondsLeft}s</span>
       </div>
-      <div class="progress"><span style="width: ${progressPercent}%"></span></div>
+      <div class="progress" aria-label="진행률">
+        <progress value="${progressPercent}" max="100"></progress>
+      </div>
       <div class="stage-center">
         <div class="prompt-word">${escapeHtml(entry.prompt)}</div>
       </div>
       <div class="time-gauge" aria-label="남은 시간">
-        <span style="width: ${timePercent}%"></span>
+        <progress value="${timePercent}" max="100"></progress>
       </div>
     </section>
   `;
@@ -1320,7 +1322,9 @@ function renderActiveMemorize(): string {
         <span>${escapeHtml(activeMemorize.wordbookName)} · ${progress}</span>
         <span>${secondsLeft}s</span>
       </div>
-      <div class="progress"><span style="width: ${progressPercent}%"></span></div>
+      <div class="progress" aria-label="진행률">
+        <progress value="${progressPercent}" max="100"></progress>
+      </div>
       <div class="stage-center memorize-center">
         <div class="memory-card ${activeMemorize.phase === "answer" ? "is-answer" : ""}">
           <div class="prompt-word memory-prompt">${escapeHtml(prompt)}</div>
@@ -1328,7 +1332,7 @@ function renderActiveMemorize(): string {
         </div>
       </div>
       <div class="time-gauge" aria-label="남은 시간">
-        <span style="width: ${timePercent}%"></span>
+        <progress value="${timePercent}" max="100"></progress>
       </div>
     </section>
   `;
