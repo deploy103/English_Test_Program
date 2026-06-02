@@ -4,3 +4,5 @@ data/
 .env
 .DS_Store
 npm-debug.log*
+server.txt
+서버작업.md
