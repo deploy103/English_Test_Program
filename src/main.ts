@@ -132,12 +132,13 @@ interface AuthSessionSummary {
 }
 
 type AuthMode = "login" | "register";
-type TabKey = "test" | "memorize" | "add" | "mypage" | "groups" | "manage" | "answers";
+type TabKey = "test" | "memorize" | "add" | "settings" | "groups" | "manage" | "answers" | "admin";
 type PlayPageKey = "testPlay" | "memorizePlay";
 type PageKey = TabKey | PlayPageKey | "answerDetail";
 type ActivePhase = "countdown" | "running" | "done";
 type MemorizeDisplayMode = "en" | "ko" | "both";
 type MemorizePhase = "prompt" | "answer" | "done";
+type ColorMode = "light" | "dark";
 
 interface ActiveTest {
   phase: ActivePhase;
@@ -201,6 +202,9 @@ let wordbookSearch = "";
 let answerSearch = "";
 let editingWordbookId = "";
 let authSessions: AuthSessionSummary[] = [];
+let colorMode: ColorMode = loadColorMode();
+
+applyColorMode();
 
 const DEFAULT_GROUP_NAME = "기본 그룹";
 const MEMORIZE_MIN_DISPLAY_SECONDS = 1;
@@ -212,10 +216,11 @@ const TAB_ROUTES: Record<TabKey, string> = {
   test: "/test",
   memorize: "/memorize",
   add: "/wordbooks/new",
-  mypage: "/me",
+  settings: "/settings",
   groups: "/groups",
   manage: "/wordbooks",
-  answers: "/answers"
+  answers: "/answers",
+  admin: "/admin"
 };
 const PLAY_ROUTES: Record<PlayPageKey, string> = {
   testPlay: "/test/play",
@@ -431,10 +436,11 @@ function renderSidebar(): string {
         ${renderNavButton("test", "퀴즈")}
         ${renderNavButton("memorize", "암기 모드")}
         ${renderNavButton("add", "새 단어장")}
-        ${renderNavButton("mypage", "계정")}
         ${renderNavButton("manage", "단어장")}
         ${renderNavButton("groups", "그룹")}
         ${renderNavButton("answers", "기록")}
+        ${renderNavButton("settings", "설정")}
+        ${currentUser?.role === "admin" ? renderNavButton("admin", "관리자") : ""}
       </nav>
 
       <section class="side-section account-section">
@@ -501,8 +507,11 @@ function renderCurrentTab(): string {
   if (page === "add") {
     return renderAddTab();
   }
-  if (page === "mypage") {
-    return renderMyPageTab();
+  if (page === "settings") {
+    return renderSettingsTab();
+  }
+  if (page === "admin") {
+    return renderAdminPage();
   }
   if (page === "manage") {
     return renderManageTab();
@@ -736,7 +745,7 @@ function renderAddTab(): string {
   `;
 }
 
-function renderMyPageTab(): string {
+function renderSettingsTab(): string {
   const user = currentUser;
   if (!user) {
     return "";
@@ -745,13 +754,27 @@ function renderMyPageTab(): string {
   return `
     <section class="page-header">
       <div>
-        <p class="eyebrow">계정</p>
-        <h2>${escapeHtml(user.name)}</h2>
+        <p class="eyebrow">설정</p>
+        <h2>계정과 화면 설정</h2>
       </div>
       <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
     </section>
 
-    <section class="mypage-layout">
+    <section class="settings-layout">
+      <section class="panel theme-panel">
+        <h3>화면</h3>
+        <div class="theme-choice" role="group" aria-label="화면 모드">
+          <button class="theme-option ${colorMode === "light" ? "is-active" : ""}" data-theme-mode="light" type="button">
+            <span>라이트</span>
+            <small>밝은 화면</small>
+          </button>
+          <button class="theme-option ${colorMode === "dark" ? "is-active" : ""}" data-theme-mode="dark" type="button">
+            <span>다크</span>
+            <small>어두운 화면</small>
+          </button>
+        </div>
+      </section>
+
       <article class="panel profile-panel">
         <h3>계정</h3>
         <dl class="profile-list">
@@ -795,8 +818,6 @@ function renderMyPageTab(): string {
         </div>
       </section>
     </section>
-
-    ${user.role === "admin" ? renderAdminDashboard() : ""}
   `;
 }
 
@@ -843,6 +864,24 @@ function renderAdminDashboard(): string {
       `}
     </section>
   `;
+}
+
+function renderAdminPage(): string {
+  if (currentUser?.role !== "admin") {
+    return `
+      <section class="page-header">
+        <div>
+          <p class="eyebrow">관리자</p>
+          <h2>접근할 수 없습니다</h2>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="empty-note">관리자 권한이 필요합니다.</div>
+      </section>
+    `;
+  }
+
+  return renderAdminDashboard();
 }
 
 function renderAdminUser(user: AdminUserSummary): string {
@@ -1540,6 +1579,12 @@ function bindEvents(): void {
   document.querySelector<HTMLFormElement>("#password-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void changePasswordFromForm(new FormData(event.currentTarget as HTMLFormElement));
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-theme-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setColorMode(button.dataset.themeMode === "dark" ? "dark" : "light");
+    });
   });
 
   document.querySelectorAll<HTMLButtonElement>("[data-revoke-session-id]").forEach((button) => {
@@ -2353,8 +2398,11 @@ function parseRoute(pathname: string): { page: PageKey; resultId?: string } {
   if (segments[0] === "wordbooks" && segments.length === 1) {
     return { page: "manage" };
   }
-  if (segments[0] === "me") {
-    return { page: "mypage" };
+  if (segments[0] === "settings" || segments[0] === "me") {
+    return { page: "settings" };
+  }
+  if (segments[0] === "admin") {
+    return { page: "admin" };
   }
   if (segments[0] === "groups") {
     return { page: "groups" };
@@ -2748,16 +2796,42 @@ function tabLabel(value: TabKey): string {
   if (value === "manage") {
     return "단어장";
   }
-  if (value === "mypage") {
-    return "계정";
-  }
   if (value === "groups") {
     return "그룹";
   }
   if (value === "answers") {
     return "기록";
   }
+  if (value === "settings") {
+    return "설정";
+  }
+  if (value === "admin") {
+    return "관리자";
+  }
   return "퀴즈";
+}
+
+function setColorMode(nextMode: ColorMode): void {
+  colorMode = nextMode;
+  try {
+    window.localStorage.setItem("voca-color-mode", nextMode);
+  } catch {
+    // Keep the live setting even if browser storage is blocked.
+  }
+  applyColorMode();
+  render();
+}
+
+function loadColorMode(): ColorMode {
+  try {
+    return window.localStorage.getItem("voca-color-mode") === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+function applyColorMode(): void {
+  document.documentElement.dataset.theme = colorMode;
 }
 
 function formatDate(value: string): string {
