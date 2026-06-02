@@ -138,10 +138,11 @@ app.post("/api/auth/register", rateLimitAuth, asyncRoute(async (request, respons
 }));
 
 app.post("/api/auth/login", rateLimitAuth, asyncRoute(async (request, response) => {
-  const body = request.body as { identifier?: string; password?: string };
+  const body = request.body as { identifier?: string; password?: string; rememberMe?: boolean };
   const loggedIn = await loginUser({
     identifier: body.identifier ?? "",
-    password: body.password ?? ""
+    password: body.password ?? "",
+    rememberMe: body.rememberMe === true
   }, requestMetaFrom(request));
 
   response.setHeader("Set-Cookie", loggedIn.session.cookie);

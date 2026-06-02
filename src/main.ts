@@ -340,6 +340,10 @@ function renderLoginForm(): string {
         <span>비밀번호</span>
         <input name="password" type="password" autocomplete="current-password" required />
       </label>
+      <label class="checkbox-field">
+        <input name="rememberMe" type="checkbox" value="1" />
+        <span>자동 로그인</span>
+      </label>
       <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>${isBusy ? "확인 중..." : "로그인"}</button>
     </form>
   `;
@@ -382,7 +386,10 @@ function renderAppBar(): string {
         <strong>Word Test</strong>
         <span>${pageLabel(page)} · ${wordbooks.length}개 단어장</span>
       </div>
-      <button class="ghost-button compact-home-button" id="home-button" type="button">홈</button>
+      <div class="app-actions">
+        <button class="ghost-button compact-home-button" id="home-button" type="button">홈</button>
+        <button class="ghost-button compact-logout-button" id="app-logout-button" type="button">로그아웃</button>
+      </div>
     </header>
   `;
 }
@@ -1351,6 +1358,10 @@ function bindEvents(): void {
     void logout();
   });
 
+  document.querySelector<HTMLButtonElement>("#app-logout-button")?.addEventListener("click", () => {
+    void logout();
+  });
+
   document.querySelector<HTMLFormElement>("#password-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void changePasswordFromForm(new FormData(event.currentTarget as HTMLFormElement));
@@ -1405,7 +1416,8 @@ async function login(formData: FormData): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         identifier: String(formData.get("identifier") ?? ""),
-        password: String(formData.get("password") ?? "")
+        password: String(formData.get("password") ?? ""),
+        rememberMe: formData.get("rememberMe") === "1"
       })
     });
     await applyAuthenticatedState(auth);

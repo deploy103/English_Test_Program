@@ -12,6 +12,7 @@ import type {
 
 const SESSION_COOKIE = "wt_session";
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const REMEMBER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_LOGIN_FAILURES = 10;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
 const MAX_AUDIT_LINES = 300;
@@ -56,6 +57,7 @@ export interface RegisterUserInput {
 export interface LoginInput {
   identifier: string;
   password: string;
+  rememberMe?: boolean;
 }
 
 export interface RegistrationResult {
@@ -196,7 +198,7 @@ export async function loginUser(input: LoginInput, meta: AuthRequestMeta): Promi
     user.updatedAt = now;
     await writeJson(userPath(user.id), user);
 
-    const session = await createSession(user, meta);
+    const session = await createSession(user, meta, input.rememberMe ? REMEMBER_SESSION_TTL_MS : SESSION_TTL_MS);
     await appendAuditLog({
       event: "auth.login",
       result: "success",
@@ -414,11 +416,11 @@ function assertStrongPassword(value: string): void {
   }
 }
 
-async function createSession(user: UserRecord, meta: AuthRequestMeta): Promise<IssuedSession> {
+async function createSession(user: UserRecord, meta: AuthRequestMeta, ttlMs = SESSION_TTL_MS): Promise<IssuedSession> {
   const now = new Date();
   const token = randomToken();
   const csrfToken = randomToken();
-  const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
+  const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
   const session: SessionRecord = {
     id: crypto.randomUUID(),
     userId: user.id,
@@ -439,7 +441,7 @@ async function createSession(user: UserRecord, meta: AuthRequestMeta): Promise<I
       sameSite: "Strict",
       secure: shouldUseSecureCookie(meta),
       path: "/",
-      maxAge: Math.floor(SESSION_TTL_MS / 1000)
+      maxAge: Math.floor(ttlMs / 1000)
     })
   };
 }
