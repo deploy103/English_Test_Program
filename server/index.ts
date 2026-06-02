@@ -434,9 +434,12 @@ function securityHeaders(request: Request, response: Response, next: NextFunctio
   if (isHttpsRequest(request)) {
     response.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
   }
+  const styleSrc = process.env.NODE_ENV === "production"
+    ? "style-src 'self'"
+    : "style-src 'self' 'unsafe-inline'";
   response.setHeader(
     "Content-Security-Policy",
-    "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    `default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; script-src 'self'; ${styleSrc}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`
   );
   next();
 }

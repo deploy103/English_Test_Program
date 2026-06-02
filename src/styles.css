@@ -1554,13 +1554,33 @@ textarea:focus {
   background: #243241;
 }
 
-.progress span {
+.progress progress,
+.time-gauge progress {
   display: block;
+  width: 100%;
   height: 100%;
-  border-radius: inherit;
+  border: 0;
+  appearance: none;
+  background: transparent;
+}
+
+.progress progress::-webkit-progress-bar,
+.time-gauge progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.progress progress::-webkit-progress-value {
+  border-radius: 999px;
   background:
     linear-gradient(90deg, #f59e0b, #34d399);
   transition: width 180ms linear;
+}
+
+.progress progress::-moz-progress-bar {
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, #f59e0b, #34d399);
 }
 
 .stage-center {
@@ -1580,7 +1600,11 @@ textarea:focus {
   animation: soft-pop 220ms ease both;
 }
 
-.memorize-stage .progress span {
+.memorize-stage .progress progress::-webkit-progress-value {
+  background: #34d399;
+}
+
+.memorize-stage .progress progress::-moz-progress-bar {
   background: #34d399;
 }
 
@@ -1633,12 +1657,15 @@ textarea:focus {
   background: #17212c;
 }
 
-.time-gauge span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
+.time-gauge progress::-webkit-progress-value {
+  border-radius: 999px;
   background: #34d399;
   transition: width 100ms linear;
+}
+
+.time-gauge progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: #34d399;
 }
 
 @media (max-width: 900px) {
