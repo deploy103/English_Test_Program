@@ -1017,6 +1017,7 @@ function renderManageItem(book: WordbookSummary): string {
         <button class="ghost-button" data-use-wordbook-id="${book.id}" type="button">퀴즈</button>
         <button class="ghost-button" data-memorize-wordbook-id="${book.id}" type="button">암기</button>
         <button class="ghost-button" data-edit-wordbook-id="${book.id}" type="button">편집</button>
+        <a class="ghost-button" href="/api/wordbooks/${book.id}/download" download>JSON</a>
         <button class="danger-button" data-delete-wordbook-id="${book.id}" type="button">삭제</button>
       </div>
     </article>
