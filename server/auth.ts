@@ -7,6 +7,7 @@ import type {
   PasswordParams,
   PublicUser,
   SessionRecord,
+  SessionSummary,
   UserRecord
 } from "./types.js";
 
@@ -297,6 +298,56 @@ export async function revokeOtherUserSessions(userId: string, keepSessionId: str
   await Promise.all(sessions
     .filter((session) => session.userId === userId && session.id !== keepSessionId)
     .map((session) => fs.rm(sessionPath(session.id), { force: true })));
+}
+
+export async function listUserSessions(userId: string, currentSessionId: string): Promise<SessionSummary[]> {
+  assertSafeId(userId);
+  assertSafeId(currentSessionId);
+  const now = Date.now();
+  const sessions = await readRecords<SessionRecord>(SESSION_DIR);
+  const expired = sessions.filter((session) => new Date(session.expiresAt).getTime() <= now);
+  await Promise.all(expired.map((session) => fs.rm(sessionPath(session.id), { force: true })));
+
+  return sessions
+    .filter((session) => session.userId === userId && new Date(session.expiresAt).getTime() > now)
+    .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt) || b.createdAt.localeCompare(a.createdAt))
+    .map((session) => ({
+      id: session.id,
+      current: session.id === currentSessionId,
+      createdAt: session.createdAt,
+      expiresAt: session.expiresAt,
+      lastSeenAt: session.lastSeenAt,
+      userAgent: session.userAgent,
+      ipAddress: session.ipAddress
+    }));
+}
+
+export async function revokeUserSession(
+  user: UserRecord,
+  currentSession: SessionRecord,
+  targetSessionId: string,
+  meta: AuthRequestMeta
+): Promise<void> {
+  assertSafeId(targetSessionId);
+  if (targetSessionId === currentSession.id) {
+    badRequest("현재 로그인은 로그아웃으로 종료하세요.");
+  }
+
+  const session = await readRecord<SessionRecord>(sessionPath(targetSessionId), "세션을 찾을 수 없습니다.");
+  if (session.userId !== user.id) {
+    throw new HttpError(404, "세션을 찾을 수 없습니다.");
+  }
+
+  await fs.rm(sessionPath(session.id), { force: true });
+  await appendAuditLog({
+    event: "auth.session_revoke",
+    result: "success",
+    actorUserId: user.id,
+    actorLoginId: user.loginId,
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    message: `session=${session.id}`
+  });
 }
 
 export async function destroySession(session: SessionRecord, user: UserRecord, meta: AuthRequestMeta): Promise<void> {
