@@ -132,7 +132,7 @@ interface AuthSessionSummary {
 }
 
 type AuthMode = "login" | "register";
-type TabKey = "test" | "memorize" | "add" | "settings" | "groups" | "manage" | "answers" | "admin";
+type TabKey = "home" | "test" | "memorize" | "add" | "settings" | "groups" | "manage" | "answers" | "admin";
 type PlayPageKey = "testPlay" | "memorizePlay";
 type PageKey = TabKey | PlayPageKey | "answerDetail";
 type ActivePhase = "countdown" | "running" | "done";
@@ -172,8 +172,8 @@ if (!appRoot) {
 
 const app = appRoot;
 
-let page: PageKey = "test";
-let tab: TabKey = "test";
+let page: PageKey = "home";
+let tab: TabKey = "home";
 let wordbooks: WordbookSummary[] = [];
 let groups: WordbookGroupSummary[] = [];
 let results: ResultSummary[] = [];
@@ -214,6 +214,7 @@ const MEMORIZE_DEFAULT_DISPLAY_SECONDS = 3;
 const MEMORIZE_ANSWER_SECONDS = 3;
 const MEMORIZE_ANSWER_MS = MEMORIZE_ANSWER_SECONDS * 1000;
 const TAB_ROUTES: Record<TabKey, string> = {
+  home: "/home",
   test: "/test",
   memorize: "/memorize",
   add: "/wordbooks/new",
@@ -252,7 +253,7 @@ async function bootstrap(): Promise<void> {
   }
 
   if (window.location.pathname === "/") {
-    window.history.replaceState(null, "", TAB_ROUTES.test);
+    window.history.replaceState(null, "", TAB_ROUTES.home);
   }
 
   applyRouteFromLocation();
@@ -424,7 +425,8 @@ function renderAppBar(): string {
         <span>${pageLabel(page)} · ${wordbooks.length}개 단어장</span>
       </div>
       <div class="app-actions">
-        <button class="ghost-button compact-home-button" id="home-button" type="button">홈</button>
+        ${page === "home" ? "" : `<button class="ghost-button compact-home-button" data-home-button type="button">홈</button>`}
+        <button class="ghost-button compact-settings-button" data-tab="settings" type="button">설정</button>
         <button class="ghost-button compact-logout-button" id="app-logout-button" type="button">로그아웃</button>
       </div>
     </header>
@@ -444,6 +446,7 @@ function renderSidebar(): string {
       </div>
 
       <nav class="nav-tabs" aria-label="주요 메뉴">
+        ${renderNavButton("home", "홈")}
         ${renderNavButton("test", "퀴즈")}
         ${renderNavButton("memorize", "암기 모드")}
         ${renderNavButton("add", "새 단어장")}
@@ -483,13 +486,80 @@ function renderTopActions(): string {
   return `
     <div class="top-actions">
       <button class="ghost-button" id="stop-test-button" type="button">중단</button>
-      <button class="ghost-button home-button" id="home-button" type="button">홈</button>
+      <button class="ghost-button home-button" data-home-button type="button">홈</button>
     </div>
   `;
 }
 
 function renderNavButton(key: TabKey, label: string): string {
   return `<a class="nav-button ${tab === key ? "is-active" : ""}" href="${TAB_ROUTES[key]}" data-route data-tab="${key}">${label}</a>`;
+}
+
+function renderHomeTab(): string {
+  const selected = selectedWordbook();
+  return `
+    <section class="home-hero">
+      <div>
+        <p class="eyebrow">Voca Studio</p>
+        <h2>${escapeHtml(currentUser?.name ?? "")}님, 바로 시작하세요</h2>
+        <p>${wordbooks.length ? `${wordbooks.length}개 단어장 · ${totalWords()}개 단어가 준비되어 있습니다.` : "단어장을 추가하면 퀴즈와 암기 모드를 바로 시작할 수 있습니다."}</p>
+      </div>
+    </section>
+
+    <section class="home-action-grid">
+      <button class="home-action-card is-primary" data-tab="test" type="button">
+        <span>단어 테스트</span>
+        <strong>${selected ? escapeHtml(selected.name) : "퀴즈 시작"}</strong>
+        <small>${selected ? `${selected.wordCount}개 단어 · ${escapeHtml(selected.group || DEFAULT_GROUP_NAME)}` : "단어장을 먼저 추가하세요"}</small>
+      </button>
+      <button class="home-action-card" data-tab="memorize" type="button">
+        <span>암기하러가기</span>
+        <strong>시간 맞춰 보기</strong>
+        <small>영어, 한국어, 둘 다 표시를 선택할 수 있습니다.</small>
+      </button>
+      <button class="home-action-card" data-tab="add" type="button">
+        <span>단어장 만들기</span>
+        <strong>직접 입력 또는 JSON</strong>
+        <small>새 단어장을 저장하고 그룹으로 정리하세요.</small>
+      </button>
+      <button class="home-action-card" data-tab="answers" type="button">
+        <span>학습 기록</span>
+        <strong>${results.length}개 기록</strong>
+        <small>퀴즈 결과를 다시 확인하고 다운로드하세요.</small>
+      </button>
+    </section>
+
+    <section class="home-summary-grid">
+      <article class="panel">
+        <h3>최근 단어장</h3>
+        <div class="home-list">
+          ${wordbooks.slice(0, 4).map((book) => `
+            <button class="list-item" data-wordbook-id="${book.id}" type="button">
+              <span class="item-title">${escapeHtml(book.name)}</span>
+              <span class="item-meta">${escapeHtml(book.group || DEFAULT_GROUP_NAME)} · ${book.wordCount}개</span>
+            </button>
+          `).join("") || `<div class="empty-note">단어장이 없습니다.</div>`}
+        </div>
+      </article>
+      <article class="panel">
+        <h3>오늘 바로가기</h3>
+        <div class="metric-row">
+          <div>
+            <span class="metric-value">${totalWords()}</span>
+            <span class="metric-label">총 단어</span>
+          </div>
+          <div>
+            <span class="metric-value">${groups.length}</span>
+            <span class="metric-label">그룹</span>
+          </div>
+        </div>
+        <div class="stacked-actions">
+          <button class="primary-button" data-tab="test" type="button">테스트 시작</button>
+          <button class="ghost-button" data-tab="memorize" type="button">암기 모드</button>
+        </div>
+      </article>
+    </section>
+  `;
 }
 
 function renderWordbookItem(book: WordbookSummary): string {
@@ -512,6 +582,9 @@ function renderSidebarGroup(section: WordbookGroup): string {
 }
 
 function renderCurrentTab(): string {
+  if (page === "home") {
+    return renderHomeTab();
+  }
   if (page === "memorize") {
     return renderMemorizeTab();
   }
@@ -1494,8 +1567,10 @@ function bindEvents(): void {
     });
   });
 
-  document.querySelector<HTMLButtonElement>("#home-button")?.addEventListener("click", () => {
-    void goHome();
+  document.querySelectorAll<HTMLButtonElement>("[data-home-button]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void goHome();
+    });
   });
 
   document.querySelector<HTMLButtonElement>("#stop-test-button")?.addEventListener("click", () => {
@@ -1692,7 +1767,7 @@ async function applyAuthenticatedState(auth: AuthResponse): Promise<void> {
   }
 
   if (window.location.pathname === "/") {
-    window.history.replaceState(null, "", TAB_ROUTES.test);
+    window.history.replaceState(null, "", TAB_ROUTES.home);
   }
   applyRouteFromLocation();
   await refreshAll();
@@ -2061,7 +2136,7 @@ async function goHome(): Promise<void> {
     if (!confirmed) {
       return;
     }
-    await abortActiveTest();
+    await abortActiveTest("home");
     return;
   }
 
@@ -2070,14 +2145,14 @@ async function goHome(): Promise<void> {
     if (!confirmed) {
       return;
     }
-    abortActiveMemorize("test");
+    abortActiveMemorize("home");
     return;
   }
 
   selectedResult = null;
   selectedResultId = "";
   clearToast();
-  navigateToTab("test");
+  navigateToTab("home");
 }
 
 function startCountdown(result: TestResult): void {
@@ -2321,12 +2396,12 @@ async function handleLocationChange(): Promise<void> {
 
 async function syncActiveSessionWithRoute(): Promise<boolean> {
   if (activeTest && page !== "testPlay") {
-    await abortActiveTest("test", true);
+    await abortActiveTest(tabForPage(page), true);
     return true;
   }
 
   if (activeMemorize && page !== "memorizePlay") {
-    abortActiveMemorize("memorize", true);
+    abortActiveMemorize(tabForPage(page), true);
     return true;
   }
 
@@ -2394,7 +2469,10 @@ function parseRoute(pathname: string): { page: PageKey; resultId?: string } {
   if (segments[0] === "test" && segments[1] === "play") {
     return { page: "testPlay" };
   }
-  if (segments.length === 0 || segments[0] === "test") {
+  if (segments.length === 0 || segments[0] === "home") {
+    return { page: "home" };
+  }
+  if (segments[0] === "test") {
     return { page: "test" };
   }
   if (segments[0] === "memorize" && segments[1] === "play") {
@@ -2425,8 +2503,8 @@ function parseRoute(pathname: string): { page: PageKey; resultId?: string } {
     return { page: "answers" };
   }
 
-  window.history.replaceState(null, "", TAB_ROUTES.test);
-  return { page: "test" };
+  window.history.replaceState(null, "", TAB_ROUTES.home);
+  return { page: "home" };
 }
 
 function safeDecodePathSegment(value: string): string {
@@ -2798,6 +2876,9 @@ function pageLabel(value: PageKey): string {
 }
 
 function tabLabel(value: TabKey): string {
+  if (value === "home") {
+    return "홈";
+  }
   if (value === "add") {
     return "새 단어장";
   }
