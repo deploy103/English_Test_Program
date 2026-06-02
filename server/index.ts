@@ -262,6 +262,19 @@ app.get("/api/wordbooks", asyncRoute(async (request, response) => {
   response.json(await listWordbooks(authOf(request).user.id));
 }));
 
+app.get("/api/wordbooks/:id/download", asyncRoute(async (request, response) => {
+  const wordbook = await getWordbook(request.params.id, authOf(request).user.id);
+  const filename = `${sanitizeDownloadName(wordbook.name)}_${wordbook.updatedAt.slice(0, 10)}.json`;
+  response.setHeader("Content-Type", "application/json; charset=utf-8");
+  response.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  response.send(JSON.stringify({
+    name: wordbook.name,
+    group: wordbook.group,
+    description: wordbook.description,
+    words: wordbook.words
+  }, null, 2));
+}));
+
 app.get("/api/wordbooks/:id", asyncRoute(async (request, response) => {
   response.json(await getWordbook(request.params.id, authOf(request).user.id));
 }));
