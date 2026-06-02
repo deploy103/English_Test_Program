@@ -33,7 +33,8 @@ const MAX_WORD_CELL_LENGTH = 200;
 const DEFAULT_TEST_WRITING_SECONDS = 3;
 const MIN_TEST_WRITING_SECONDS = 3;
 const MAX_TEST_WRITING_SECONDS = 30;
-export const MAX_JSON_UPLOAD_BYTES = 2 * 1024 * 1024;
+export const MAX_JSON_UPLOAD_MEGABYTES = 5;
+export const MAX_JSON_UPLOAD_BYTES = MAX_JSON_UPLOAD_MEGABYTES * 1024 * 1024;
 const JSON_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 export const DATA_DIR = path.resolve(process.env.WORD_TEST_DATA_DIR || DEFAULT_DATA_DIR);
@@ -898,7 +899,7 @@ async function readUploadedJson(filePath: string): Promise<unknown> {
     badRequest("빈 JSON 파일은 업로드할 수 없습니다.");
   }
   if (stats.size > MAX_JSON_UPLOAD_BYTES) {
-    badRequest("JSON 파일은 2MB 이하만 업로드할 수 있습니다.");
+    badRequest(`JSON 파일은 ${MAX_JSON_UPLOAD_MEGABYTES}MB 이하만 업로드할 수 있습니다.`);
   }
 
   const bytes = await fs.readFile(filePath);
