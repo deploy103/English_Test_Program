@@ -1,9 +1,29 @@
 import "./styles.css";
 
 type TestMode = "ko" | "en" | "rand";
+type UserRole = "admin" | "user";
+
+interface CurrentUser {
+  id: string;
+  loginId: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+}
+
+interface AuthResponse {
+  authenticated: boolean;
+  user?: CurrentUser;
+  csrfToken?: string;
+  hasUsers: boolean;
+}
 
 interface WordbookSummary {
   id: string;
+  ownerId?: string;
   name: string;
   group: string;
   description: string;
@@ -41,6 +61,7 @@ interface TestResult {
 
 interface ResultSummary {
   id: string;
+  ownerId?: string;
   wordbookId: string;
   wordbookName: string;
   questionCount: number;
@@ -52,6 +73,7 @@ interface ResultSummary {
 
 interface WordbookGroupSummary {
   id: string;
+  ownerId?: string;
   name: string;
   wordbookCount: number;
   wordCount: number;
@@ -69,7 +91,35 @@ interface AddDraft {
   manualWords: string;
 }
 
-type TabKey = "test" | "add" | "groups" | "manage" | "answers";
+interface AdminUserSummary extends CurrentUser {}
+
+interface AdminWordbookSummary extends WordbookSummary {
+  ownerLoginId?: string;
+  ownerEmail?: string;
+  ownerName?: string;
+}
+
+interface AdminWordbookDetail extends AdminWordbookSummary {
+  words: WordEntry[];
+}
+
+interface AuditLogEntry {
+  id: string;
+  createdAt: string;
+  event: string;
+  result: "success" | "failure";
+  actorUserId?: string;
+  actorLoginId?: string;
+  targetUserId?: string;
+  targetWordbookId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  message?: string;
+}
+
+type AuthMode = "login" | "register";
+type TabKey = "test" | "add" | "mypage" | "groups" | "manage" | "answers";
+type PageKey = TabKey | "answerDetail";
 type ActivePhase = "countdown" | "running" | "done";
 
 interface ActiveTest {
@@ -93,19 +143,42 @@ if (!appRoot) {
 
 const app = appRoot;
 
+let page: PageKey = "test";
 let tab: TabKey = "test";
 let wordbooks: WordbookSummary[] = [];
 let groups: WordbookGroupSummary[] = [];
 let results: ResultSummary[] = [];
 let selectedWordbookId = "";
 let selectedResult: TestResult | null = null;
+let selectedResultId = "";
 let activeTest: ActiveTest | null = null;
 let timer: number | null = null;
 let toastMessage = "";
 let isBusy = false;
 let isSidebarOpen = false;
+let isAnswerLoading = false;
+let answerRequestToken = 0;
+let currentUser: CurrentUser | null = null;
+let csrfToken = "";
+let authHasUsers = true;
+let authMode: AuthMode = "login";
+let adminUsers: AdminUserSummary[] = [];
+let adminWordbooks: AdminWordbookSummary[] = [];
+let adminLogs: AuditLogEntry[] = [];
+let selectedAdminWordbook: AdminWordbookDetail | null = null;
+let isAdminWordbookLoading = false;
+let isAdminLoading = false;
 
 const DEFAULT_GROUP_NAME = "기본 그룹";
+const TAB_ROUTES: Record<TabKey, string> = {
+  test: "/test",
+  add: "/wordbooks/new",
+  mypage: "/me",
+  groups: "/groups",
+  manage: "/wordbooks",
+  answers: "/answers"
+};
+
 const addDraft: AddDraft = {
   uploadName: "",
   uploadGroup: "",
@@ -119,11 +192,30 @@ const addDraft: AddDraft = {
 void bootstrap();
 
 async function bootstrap(): Promise<void> {
+  window.addEventListener("popstate", () => {
+    void handleLocationChange();
+  });
+
+  await loadAuthState();
+  if (!currentUser) {
+    render();
+    return;
+  }
+
+  if (window.location.pathname === "/") {
+    window.history.replaceState(null, "", TAB_ROUTES.test);
+  }
+
+  applyRouteFromLocation();
   await refreshAll();
-  render();
+  await syncPageData();
 }
 
 async function refreshAll(): Promise<void> {
+  if (!currentUser) {
+    return;
+  }
+
   const [groupList, bookList, resultList] = await Promise.all([
     api<WordbookGroupSummary[]>("/api/groups"),
     api<WordbookSummary[]>("/api/wordbooks"),
@@ -133,6 +225,16 @@ async function refreshAll(): Promise<void> {
   groups = groupList;
   wordbooks = bookList;
   results = resultList;
+
+  if (currentUser.role === "admin") {
+    await refreshAdminData();
+  } else {
+    adminUsers = [];
+    adminWordbooks = [];
+    adminLogs = [];
+    selectedAdminWordbook = null;
+    isAdminWordbookLoading = false;
+  }
 
   syncAddDraftGroups();
 
@@ -146,6 +248,12 @@ async function refreshAll(): Promise<void> {
 }
 
 function render(): void {
+  if (!currentUser) {
+    app.innerHTML = renderAuthPage();
+    bindEvents();
+    return;
+  }
+
   const isTesting = Boolean(activeTest);
   app.innerHTML = `
     <div class="app-shell ${isTesting ? "is-testing" : ""} ${isSidebarOpen ? "sidebar-open" : ""}">
@@ -163,6 +271,71 @@ function render(): void {
   bindEvents();
 }
 
+function renderAuthPage(): string {
+  return `
+    <main class="auth-page">
+      ${toastMessage ? `<div class="toast" role="status">${escapeHtml(toastMessage)}</div>` : ""}
+      <section class="auth-panel">
+        <div class="auth-brand">
+          <div class="brand-mark">WT</div>
+          <div>
+            <h1>Word Test</h1>
+            <p>${authHasUsers ? "로그인 후 내 단어장을 관리하세요." : "첫 가입 계정은 자동으로 관리자 권한을 받습니다."}</p>
+          </div>
+        </div>
+
+        <div class="auth-switch" role="tablist" aria-label="인증 방식">
+          <button class="${authMode === "login" ? "is-active" : ""}" data-auth-mode="login" type="button" ${authHasUsers ? "" : "disabled"}>로그인</button>
+          <button class="${authMode === "register" ? "is-active" : ""}" data-auth-mode="register" type="button">회원가입</button>
+        </div>
+
+        ${authMode === "register" ? renderRegisterForm() : renderLoginForm()}
+      </section>
+    </main>
+  `;
+}
+
+function renderLoginForm(): string {
+  return `
+    <form class="auth-form" id="login-form">
+      <label class="field">
+        <span>아이디 또는 이메일</span>
+        <input name="identifier" type="text" autocomplete="username" required />
+      </label>
+      <label class="field">
+        <span>비밀번호</span>
+        <input name="password" type="password" autocomplete="current-password" required />
+      </label>
+      <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>${isBusy ? "확인 중..." : "로그인"}</button>
+    </form>
+  `;
+}
+
+function renderRegisterForm(): string {
+  return `
+    <form class="auth-form" id="register-form">
+      <label class="field">
+        <span>이메일</span>
+        <input name="email" type="email" autocomplete="email" maxlength="254" required />
+      </label>
+      <label class="field">
+        <span>아이디</span>
+        <input name="loginId" type="text" autocomplete="username" maxlength="32" pattern="[A-Za-z0-9._-]{3,32}" required />
+      </label>
+      <label class="field">
+        <span>이름</span>
+        <input name="name" type="text" autocomplete="name" maxlength="60" required />
+      </label>
+      <label class="field">
+        <span>비밀번호</span>
+        <input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
+      </label>
+      <p class="auth-hint">비밀번호는 12자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.</p>
+      <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>${isBusy ? "생성 중..." : "회원가입"}</button>
+    </form>
+  `;
+}
+
 function renderAppBar(): string {
   return `
     <header class="app-bar">
@@ -173,7 +346,7 @@ function renderAppBar(): string {
       </button>
       <div class="app-title">
         <strong>Word Test</strong>
-        <span>${tabLabel(tab)} · ${wordbooks.length}개 단어장</span>
+        <span>${pageLabel(page)} · ${wordbooks.length}개 단어장</span>
       </div>
       <button class="ghost-button compact-home-button" id="home-button" type="button">홈</button>
     </header>
@@ -187,7 +360,7 @@ function renderSidebar(): string {
         <div class="brand-mark">WT</div>
         <div>
           <h1>Word Test</h1>
-          <p>${groups.length}개 그룹 · ${wordbooks.length}개 단어장</p>
+          <p>${escapeHtml(currentUser?.name ?? "")} · ${currentUser?.role === "admin" ? "관리자" : "사용자"}</p>
         </div>
         <button class="icon-button close-button" id="close-menu-button" type="button" aria-label="메뉴 닫기">×</button>
       </div>
@@ -195,10 +368,19 @@ function renderSidebar(): string {
       <nav class="nav-tabs" aria-label="주요 메뉴">
         ${renderNavButton("test", "테스트")}
         ${renderNavButton("add", "추가")}
-        ${renderNavButton("groups", "그룹관리")}
+        ${renderNavButton("mypage", "내 페이지")}
         ${renderNavButton("manage", "관리")}
+        ${renderNavButton("groups", "그룹관리")}
         ${renderNavButton("answers", "정답지")}
       </nav>
+
+      <section class="side-section account-section">
+        <div class="side-heading">
+          <span>${escapeHtml(currentUser?.loginId ?? "")}</span>
+          <span>${groups.length} groups</span>
+        </div>
+        <button class="ghost-button" id="logout-button" type="button">로그아웃</button>
+      </section>
 
       <section class="side-section">
         <div class="side-heading">
@@ -227,7 +409,7 @@ function renderTopActions(): string {
 }
 
 function renderNavButton(key: TabKey, label: string): string {
-  return `<button class="nav-button ${tab === key ? "is-active" : ""}" data-tab="${key}" type="button">${label}</button>`;
+  return `<a class="nav-button ${tab === key ? "is-active" : ""}" href="${TAB_ROUTES[key]}" data-route data-tab="${key}">${label}</a>`;
 }
 
 function renderWordbookItem(book: WordbookSummary): string {
@@ -250,17 +432,23 @@ function renderSidebarGroup(section: WordbookGroup): string {
 }
 
 function renderCurrentTab(): string {
-  if (tab === "add") {
+  if (page === "add") {
     return renderAddTab();
   }
-  if (tab === "manage") {
+  if (page === "mypage") {
+    return renderMyPageTab();
+  }
+  if (page === "manage") {
     return renderManageTab();
   }
-  if (tab === "groups") {
+  if (page === "groups") {
     return renderGroupsTab();
   }
-  if (tab === "answers") {
+  if (page === "answers") {
     return renderAnswersTab();
+  }
+  if (page === "answerDetail") {
+    return renderAnswerDetailPage();
   }
   return renderTestTab();
 }
@@ -419,6 +607,176 @@ function renderAddTab(): string {
   `;
 }
 
+function renderMyPageTab(): string {
+  const user = currentUser;
+  if (!user) {
+    return "";
+  }
+
+  return `
+    <section class="page-header">
+      <div>
+        <p class="eyebrow">내 페이지</p>
+        <h2>${escapeHtml(user.name)}</h2>
+      </div>
+      <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
+    </section>
+
+    <section class="mypage-layout">
+      <article class="panel profile-panel">
+        <h3>계정</h3>
+        <dl class="profile-list">
+          <div><dt>아이디</dt><dd>${escapeHtml(user.loginId)}</dd></div>
+          <div><dt>이메일</dt><dd>${escapeHtml(user.email)}</dd></div>
+          <div><dt>권한</dt><dd>${user.role === "admin" ? "관리자" : "사용자"}</dd></div>
+          <div><dt>가입</dt><dd>${formatDate(user.createdAt)}</dd></div>
+        </dl>
+      </article>
+
+      <form class="panel password-panel" id="password-form">
+        <h3>비밀번호 변경</h3>
+        <label class="field">
+          <span>현재 비밀번호</span>
+          <input name="currentPassword" type="password" autocomplete="current-password" required />
+        </label>
+        <label class="field">
+          <span>새 비밀번호</span>
+          <input name="nextPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
+        </label>
+        <p class="auth-hint">새 비밀번호는 12자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.</p>
+        <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>변경</button>
+      </form>
+
+      <section class="panel management-panel">
+        <h3>관리</h3>
+        <div class="management-actions">
+          <button class="ghost-button" data-tab="manage" type="button">단어장 관리</button>
+          <button class="ghost-button" data-tab="groups" type="button">그룹관리</button>
+          <button class="primary-button" data-tab="add" type="button">단어장 추가</button>
+        </div>
+      </section>
+    </section>
+
+    ${user.role === "admin" ? renderAdminDashboard() : ""}
+  `;
+}
+
+function renderAdminDashboard(): string {
+  return `
+    <section class="admin-dashboard">
+      <div class="page-header admin-header">
+        <div>
+          <p class="eyebrow">관리자</p>
+          <h2>사용자 · 서버로그 · 전체 단어장</h2>
+        </div>
+      </div>
+      ${isAdminLoading ? `<div class="panel empty-note">관리자 데이터를 불러오는 중입니다.</div>` : `
+        <div class="admin-grid">
+          <article class="panel admin-panel">
+            <h3>사용자</h3>
+            ${adminUsers.length ? adminUsers.map(renderAdminUser).join("") : `<div class="empty-note">사용자가 없습니다.</div>`}
+          </article>
+          <article class="panel admin-panel">
+            <h3>사용자 단어장</h3>
+            ${adminWordbooks.length ? adminWordbooks.map(renderAdminWordbook).join("") : `<div class="empty-note">단어장이 없습니다.</div>`}
+          </article>
+          <article class="panel admin-panel admin-log-panel">
+            <h3>서버로그</h3>
+            ${adminLogs.length ? adminLogs.map(renderAuditLog).join("") : `<div class="empty-note">로그가 없습니다.</div>`}
+          </article>
+        </div>
+        ${renderAdminWordbookDetail()}
+      `}
+    </section>
+  `;
+}
+
+function renderAdminUser(user: AdminUserSummary): string {
+  return `
+    <article class="admin-row">
+      <div>
+        <strong>${escapeHtml(user.name)}</strong>
+        <span>${escapeHtml(user.loginId)} · ${escapeHtml(user.email)}</span>
+      </div>
+      <small>${user.role === "admin" ? "관리자" : "사용자"}</small>
+    </article>
+  `;
+}
+
+function renderAdminWordbook(book: AdminWordbookSummary): string {
+  const owner = book.ownerLoginId
+    ? `${book.ownerLoginId}${book.ownerName ? ` / ${book.ownerName}` : ""}`
+    : book.ownerId ?? "unknown";
+  return `
+    <article class="admin-row">
+      <div>
+        <strong>${escapeHtml(book.name)}</strong>
+        <span>${escapeHtml(owner)} · ${escapeHtml(book.group || DEFAULT_GROUP_NAME)} · ${book.wordCount}개</span>
+      </div>
+      <button class="ghost-button mini-button" data-admin-wordbook-id="${book.id}" type="button">내용</button>
+    </article>
+  `;
+}
+
+function renderAdminWordbookDetail(): string {
+  if (isAdminWordbookLoading) {
+    return `<article class="panel admin-wordbook-detail"><div class="empty-note">단어장을 불러오는 중입니다.</div></article>`;
+  }
+
+  if (!selectedAdminWordbook) {
+    return "";
+  }
+
+  const owner = selectedAdminWordbook.ownerLoginId
+    ? `${selectedAdminWordbook.ownerLoginId}${selectedAdminWordbook.ownerName ? ` / ${selectedAdminWordbook.ownerName}` : ""}`
+    : selectedAdminWordbook.ownerId ?? "unknown";
+
+  return `
+    <article class="panel admin-wordbook-detail">
+      <div class="answer-toolbar">
+        <div>
+          <p class="eyebrow">${escapeHtml(owner)}</p>
+          <h3>${escapeHtml(selectedAdminWordbook.name)}</h3>
+        </div>
+        <span class="admin-detail-meta">${escapeHtml(selectedAdminWordbook.group || DEFAULT_GROUP_NAME)} · ${selectedAdminWordbook.wordCount}개</span>
+      </div>
+      ${selectedAdminWordbook.description ? `<p class="muted">${escapeHtml(selectedAdminWordbook.description)}</p>` : ""}
+      <div class="answer-table-wrap">
+        <table class="answer-table">
+          <thead>
+            <tr>
+              <th>번호</th>
+              <th>영어</th>
+              <th>한글</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${selectedAdminWordbook.words.map((word, index) => `
+              <tr>
+                <td>${index + 1}</td>
+                <td>${escapeHtml(word.english)}</td>
+                <td>${escapeHtml(word.korean)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function renderAuditLog(log: AuditLogEntry): string {
+  return `
+    <article class="admin-row log-row">
+      <div>
+        <strong>${escapeHtml(log.event)} · ${log.result === "success" ? "성공" : "실패"}</strong>
+        <span>${escapeHtml(log.actorLoginId ?? "system")} · ${escapeHtml(log.message ?? "")}</span>
+      </div>
+      <small>${formatDate(log.createdAt)}</small>
+    </article>
+  `;
+}
+
 function renderManageTab(): string {
   return `
     <section class="page-header">
@@ -538,34 +896,69 @@ function renderGroupManageItem(group: WordbookGroupSummary): string {
 }
 
 function renderAnswersTab(): string {
-  const result = selectedResult;
   return `
     <section class="page-header">
       <div>
-        <p class="eyebrow">이전 정답지</p>
-        <h2>${result ? escapeHtml(result.wordbookName) : "저장된 정답지"}</h2>
+        <p class="eyebrow">정답지</p>
+        <h2>${results.length ? `${results.length}개 저장됨` : "저장된 정답지"}</h2>
       </div>
       <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
     </section>
 
-    <section class="answers-layout">
-      <div class="panel answer-list">
-        ${results.length ? results.map(renderResultItem).join("") : `<div class="empty-note">아직 정답지가 없습니다.</div>`}
-      </div>
-      <div class="panel answer-detail">
-        ${result ? renderResultDetail(result) : `<div class="empty-note">왼쪽에서 정답지를 선택하세요.</div>`}
+    <section class="answer-list-page">
+      <div class="panel answer-index answer-list-panel">
+        <div class="answer-index-top">
+          <div>
+            <p class="eyebrow">최근순</p>
+            <h3>${results.length ? "정답지 목록" : "정답지 없음"}</h3>
+          </div>
+          ${results[0] ? `<span>${formatDate(results[0].createdAt)}</span>` : ""}
+        </div>
+        ${results.length ? `
+          <div class="answer-list answer-list-full">
+            ${results.map(renderResultItem).join("")}
+          </div>
+        ` : `<div class="empty-note">아직 정답지가 없습니다.</div>`}
       </div>
     </section>
   `;
 }
 
-function renderResultItem(result: ResultSummary): string {
-  const active = selectedResult?.id === result.id ? "is-active" : "";
+function renderAnswerDetailPage(): string {
+  const activeId = currentAnswerSelectionId();
+  const result = selectedResult?.id === activeId ? selectedResult : null;
+
   return `
-    <button class="list-item ${active}" data-result-id="${result.id}" type="button">
+    <section class="page-header">
+      <div>
+        <p class="eyebrow">정답지 상세</p>
+        <h2>${result ? escapeHtml(result.wordbookName) : "정답지"}</h2>
+      </div>
+      <div class="header-actions">
+        <a class="ghost-button" href="${TAB_ROUTES.answers}" data-route>목록</a>
+        <button class="ghost-button" id="refresh-button" type="button">새로고침</button>
+      </div>
+    </section>
+
+    <section class="answer-detail-layout">
+      <article class="panel answer-detail">
+        ${isAnswerLoading
+          ? `<div class="empty-note">정답지를 불러오는 중입니다.</div>`
+          : result
+            ? renderResultDetail(result)
+            : `<div class="empty-note">정답지를 선택하세요.</div>`}
+      </article>
+    </section>
+  `;
+}
+
+function renderResultItem(result: ResultSummary): string {
+  const active = currentAnswerSelectionId() === result.id ? "is-active" : "";
+  return `
+    <a class="list-item ${active}" href="${answerDetailPath(result.id)}" data-route data-result-id="${result.id}">
       <span class="item-title">${escapeHtml(result.wordbookName)}</span>
       <span class="item-meta">${result.questionCount}개 · ${modeLabel(result.mode)} · ${formatDate(result.createdAt)}</span>
-    </button>
+    </a>
   `;
 }
 
@@ -581,6 +974,28 @@ function renderResultDetail(result: TestResult): string {
         <a class="ghost-button" href="/api/results/${result.id}/download?format=txt">TXT</a>
         <a class="ghost-button" href="/api/results/${result.id}/download?format=json">JSON</a>
       </div>
+    </div>
+    <div class="answer-summary">
+      <span>${result.questionCount}문제</span>
+      <span>${modeLabel(result.mode)} 출제</span>
+      <span>${result.displaySeconds}초 표시</span>
+    </div>
+    <div class="answer-card-list">
+      ${result.answers.map((entry) => `
+        <article class="answer-card">
+          <div class="answer-number">${entry.index}</div>
+          <div class="answer-card-body">
+            <div>
+              <span>문제</span>
+              <strong>${escapeHtml(entry.prompt)}</strong>
+            </div>
+            <div>
+              <span>정답</span>
+              <strong>${escapeHtml(entry.answer)}</strong>
+            </div>
+          </div>
+        </article>
+      `).join("")}
     </div>
     <div class="answer-table-wrap">
       <table class="answer-table">
@@ -659,6 +1074,11 @@ function renderActiveTest(): string {
 }
 
 function bindEvents(): void {
+  if (!currentUser) {
+    bindAuthEvents();
+    return;
+  }
+
   document.querySelector<HTMLButtonElement>("#menu-button")?.addEventListener("click", () => {
     isSidebarOpen = !isSidebarOpen;
     render();
@@ -674,22 +1094,28 @@ function bindEvents(): void {
     render();
   });
 
-  document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((button) => {
+  document.querySelectorAll<HTMLAnchorElement>("a[data-route]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      navigateToPath(link.pathname);
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("button[data-tab]").forEach((button) => {
     button.addEventListener("click", () => {
-      tab = button.dataset.tab as TabKey;
-      isSidebarOpen = false;
-      clearToast();
-      render();
+      navigateToTab(button.dataset.tab as TabKey);
     });
   });
 
   document.querySelectorAll<HTMLButtonElement>("[data-wordbook-id]").forEach((button) => {
     button.addEventListener("click", () => {
       selectedWordbookId = button.dataset.wordbookId ?? "";
-      tab = "test";
       isSidebarOpen = false;
       clearToast();
-      render();
+      navigateToTab("test");
     });
   });
 
@@ -699,20 +1125,14 @@ function bindEvents(): void {
     render();
   });
 
-  document.querySelectorAll<HTMLButtonElement>("[data-result-id]").forEach((button) => {
-    button.addEventListener("click", () => {
-      void selectResult(button.dataset.resultId ?? "");
-    });
-  });
-
   document.querySelectorAll<HTMLButtonElement>("[data-use-wordbook-id]").forEach((button) => {
     button.addEventListener("click", () => {
       selectedWordbookId = button.dataset.useWordbookId ?? "";
       selectedResult = null;
-      tab = "test";
+      selectedResultId = "";
       isSidebarOpen = false;
       clearToast();
-      render();
+      navigateToTab("test");
     });
   });
 
@@ -771,6 +1191,183 @@ function bindEvents(): void {
   document.querySelector<HTMLButtonElement>("#refresh-button")?.addEventListener("click", () => {
     void refreshAndRender();
   });
+
+  document.querySelector<HTMLButtonElement>("#logout-button")?.addEventListener("click", () => {
+    void logout();
+  });
+
+  document.querySelector<HTMLFormElement>("#password-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void changePasswordFromForm(new FormData(event.currentTarget as HTMLFormElement));
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-admin-wordbook-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void loadAdminWordbookDetail(button.dataset.adminWordbookId ?? "");
+    });
+  });
+}
+
+function bindAuthEvents(): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-auth-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      authMode = button.dataset.authMode === "register" ? "register" : "login";
+      clearToast();
+      render();
+    });
+  });
+
+  document.querySelector<HTMLFormElement>("#login-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void login(new FormData(event.currentTarget as HTMLFormElement));
+  });
+
+  document.querySelector<HTMLFormElement>("#register-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void register(new FormData(event.currentTarget as HTMLFormElement));
+  });
+}
+
+async function loadAuthState(): Promise<void> {
+  try {
+    const auth = await api<AuthResponse>("/api/auth/me");
+    currentUser = auth.authenticated ? auth.user ?? null : null;
+    csrfToken = auth.csrfToken ?? "";
+    authHasUsers = auth.hasUsers;
+    authMode = auth.hasUsers ? "login" : "register";
+  } catch {
+    currentUser = null;
+    csrfToken = "";
+    authHasUsers = true;
+    authMode = "login";
+  }
+}
+
+async function login(formData: FormData): Promise<void> {
+  await withBusy(async () => {
+    const auth = await api<AuthResponse>("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        identifier: String(formData.get("identifier") ?? ""),
+        password: String(formData.get("password") ?? "")
+      })
+    });
+    await applyAuthenticatedState(auth);
+    showToast("로그인했습니다.");
+  });
+}
+
+async function register(formData: FormData): Promise<void> {
+  await withBusy(async () => {
+    const auth = await api<AuthResponse>("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: String(formData.get("email") ?? ""),
+        loginId: String(formData.get("loginId") ?? ""),
+        name: String(formData.get("name") ?? ""),
+        password: String(formData.get("password") ?? "")
+      })
+    });
+    await applyAuthenticatedState(auth);
+    showToast(currentUser?.role === "admin" ? "관리자 계정을 생성했습니다." : "회원가입을 완료했습니다.");
+  });
+}
+
+async function applyAuthenticatedState(auth: AuthResponse): Promise<void> {
+  currentUser = auth.user ?? null;
+  csrfToken = auth.csrfToken ?? "";
+  authHasUsers = auth.hasUsers;
+  if (!currentUser) {
+    throw new Error("인증 응답이 올바르지 않습니다.");
+  }
+
+  if (window.location.pathname === "/") {
+    window.history.replaceState(null, "", TAB_ROUTES.test);
+  }
+  applyRouteFromLocation();
+  await refreshAll();
+  await syncPageData();
+}
+
+async function logout(): Promise<void> {
+  await withBusy(async () => {
+    await api<void>("/api/auth/logout", { method: "POST" });
+    resetAuthenticatedState();
+    window.history.replaceState(null, "", "/");
+    showToast("로그아웃했습니다.");
+  });
+}
+
+async function changePasswordFromForm(formData: FormData): Promise<void> {
+  await withBusy(async () => {
+    await api<void>("/api/auth/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        currentPassword: String(formData.get("currentPassword") ?? ""),
+        nextPassword: String(formData.get("nextPassword") ?? "")
+      })
+    });
+    showToast("비밀번호를 변경했습니다.");
+  });
+}
+
+async function refreshAdminData(): Promise<void> {
+  if (!currentUser || currentUser.role !== "admin") {
+    return;
+  }
+
+  isAdminLoading = true;
+  const [users, wordbookList, logs] = await Promise.all([
+    api<AdminUserSummary[]>("/api/admin/users"),
+    api<AdminWordbookSummary[]>("/api/admin/wordbooks"),
+    api<AuditLogEntry[]>("/api/admin/logs")
+  ]);
+  adminUsers = users;
+  adminWordbooks = wordbookList;
+  adminLogs = logs;
+  if (selectedAdminWordbook && !adminWordbooks.some((book) => book.id === selectedAdminWordbook?.id)) {
+    selectedAdminWordbook = null;
+  }
+  isAdminLoading = false;
+}
+
+async function loadAdminWordbookDetail(id: string): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  isAdminWordbookLoading = true;
+  render();
+  try {
+    selectedAdminWordbook = await api<AdminWordbookDetail>(`/api/admin/wordbooks/${id}`);
+  } catch (error) {
+    selectedAdminWordbook = null;
+    showToast(error instanceof Error ? error.message : "단어장 내용을 불러오지 못했습니다.");
+  } finally {
+    isAdminWordbookLoading = false;
+    render();
+  }
+}
+
+function resetAuthenticatedState(): void {
+  currentUser = null;
+  csrfToken = "";
+  wordbooks = [];
+  groups = [];
+  results = [];
+  adminUsers = [];
+  adminWordbooks = [];
+  adminLogs = [];
+  selectedAdminWordbook = null;
+  isAdminWordbookLoading = false;
+  selectedWordbookId = "";
+  selectedResult = null;
+  selectedResultId = "";
+  activeTest = null;
+  clearTimer();
 }
 
 async function beginTest(formData: FormData): Promise<void> {
@@ -806,10 +1403,10 @@ async function uploadWordbook(formData: FormData): Promise<void> {
       body: formData
     });
     selectedWordbookId = created.id;
-    tab = "test";
     resetUploadDraft();
     showToast("단어장을 저장했습니다.");
     await refreshAll();
+    navigateToTab("test");
   });
 }
 
@@ -832,10 +1429,10 @@ async function saveManualWordbook(formData: FormData): Promise<void> {
       })
     });
     selectedWordbookId = created.id;
-    tab = "test";
     resetManualDraft();
     showToast("단어장을 저장했습니다.");
     await refreshAll();
+    navigateToTab("test");
   });
 }
 
@@ -896,14 +1493,36 @@ async function deleteGroupById(id: string): Promise<void> {
   });
 }
 
-async function selectResult(id: string): Promise<void> {
-  if (!id) {
-    return;
+async function loadResultDetail(id: string): Promise<void> {
+  const requestToken = ++answerRequestToken;
+  selectedResultId = id;
+  if (selectedResult?.id !== id) {
+    selectedResult = null;
   }
-  selectedResult = await api<TestResult>(`/api/results/${id}`);
-  tab = "answers";
+  isAnswerLoading = true;
   clearToast();
   render();
+
+  try {
+    const result = await api<TestResult>(`/api/results/${id}`);
+    if (requestToken !== answerRequestToken) {
+      return;
+    }
+    selectedResult = result;
+  } catch (error) {
+    if (requestToken !== answerRequestToken) {
+      return;
+    }
+    selectedResult = null;
+    selectedResultId = "";
+    showToast(error instanceof Error ? error.message : "정답지를 불러오지 못했습니다.");
+    navigateToTab("answers", true);
+  } finally {
+    if (requestToken === answerRequestToken) {
+      isAnswerLoading = false;
+      render();
+    }
+  }
 }
 
 async function deleteWordbookById(id: string): Promise<void> {
@@ -938,9 +1557,9 @@ async function goHome(): Promise<void> {
   }
 
   selectedResult = null;
-  tab = "test";
+  selectedResultId = "";
   clearToast();
-  render();
+  navigateToTab("test");
 }
 
 function startCountdown(result: TestResult): void {
@@ -1017,11 +1636,11 @@ async function finishActiveTest(): Promise<void> {
     method: "PATCH"
   });
   selectedResult = completed;
+  selectedResultId = completed.id;
   activeTest = null;
-  tab = "answers";
   showToast("정답지를 저장했습니다.");
   await refreshAll();
-  render();
+  navigateToAnswerDetail(completed.id);
 }
 
 async function abortActiveTest(): Promise<void> {
@@ -1032,18 +1651,137 @@ async function abortActiveTest(): Promise<void> {
   const resultId = activeTest.result.id;
   clearTimer();
   activeTest = null;
-  tab = "test";
   showToast("테스트를 중단했습니다.");
   await api<void>(`/api/results/${resultId}`, { method: "DELETE" }).catch(() => undefined);
   await refreshAll();
+  navigateToTab("test", true);
+}
+
+function navigateToTab(nextTab: TabKey, replace = false): void {
+  navigateToPath(TAB_ROUTES[nextTab], replace);
+}
+
+function navigateToAnswerDetail(id: string, replace = false): void {
+  if (!id) {
+    return;
+  }
+  navigateToPath(answerDetailPath(id), replace);
+}
+
+function navigateToPath(path: string, replace = false): void {
+  if (window.location.pathname !== path) {
+    if (replace) {
+      window.history.replaceState(null, "", path);
+    } else {
+      window.history.pushState(null, "", path);
+    }
+  }
+  void handleLocationChange();
+}
+
+async function handleLocationChange(): Promise<void> {
+  applyRouteFromLocation();
+  await syncPageData();
+}
+
+async function syncPageData(): Promise<void> {
+  isSidebarOpen = false;
+
+  if (page === "answerDetail") {
+    if (!selectedResultId) {
+      navigateToTab("answers", true);
+      return;
+    }
+    await loadResultDetail(selectedResultId);
+    return;
+  }
+
+  if (page === "answers") {
+    selectedResult = null;
+    selectedResultId = "";
+    isAnswerLoading = false;
+  }
+
   render();
+}
+
+function applyRouteFromLocation(): void {
+  const parsed = parseRoute(window.location.pathname);
+  page = parsed.page;
+  tab = tabForPage(parsed.page);
+
+  if (parsed.page === "answerDetail") {
+    selectedResultId = parsed.resultId ?? "";
+    return;
+  }
+
+  selectedResultId = "";
+  if (parsed.page !== "answers") {
+    selectedResult = null;
+  }
+}
+
+function parseRoute(pathname: string): { page: PageKey; resultId?: string } {
+  const segments = pathname.split("/").filter(Boolean).map(safeDecodePathSegment);
+
+  if (segments.length === 0 || segments[0] === "test") {
+    return { page: "test" };
+  }
+  if (segments[0] === "wordbooks" && segments[1] === "new") {
+    return { page: "add" };
+  }
+  if (segments[0] === "wordbooks" && segments.length === 1) {
+    return { page: "manage" };
+  }
+  if (segments[0] === "me") {
+    return { page: "mypage" };
+  }
+  if (segments[0] === "groups") {
+    return { page: "groups" };
+  }
+  if (segments[0] === "answers" && segments[1]) {
+    return { page: "answerDetail", resultId: segments[1] };
+  }
+  if (segments[0] === "answers") {
+    return { page: "answers" };
+  }
+
+  window.history.replaceState(null, "", TAB_ROUTES.test);
+  return { page: "test" };
+}
+
+function safeDecodePathSegment(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 async function refreshAndRender(): Promise<void> {
   await refreshAll();
   if (selectedResult && !results.some((result) => result.id === selectedResult?.id)) {
     selectedResult = null;
+    selectedResultId = "";
   }
+  if (selectedResultId && !results.some((result) => result.id === selectedResultId)) {
+    selectedResultId = "";
+  }
+
+  if (page === "answerDetail") {
+    if (selectedResultId) {
+      await loadResultDetail(selectedResultId);
+    } else {
+      navigateToTab("answers", true);
+    }
+    return;
+  }
+
+  if (page === "answers") {
+    selectedResult = null;
+    selectedResultId = "";
+  }
+
   render();
 }
 
@@ -1065,7 +1803,18 @@ async function withBusy(work: () => Promise<void>): Promise<void> {
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const method = (init?.method ?? "GET").toUpperCase();
+  const headers = new Headers(init?.headers);
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && csrfToken && !headers.has("X-CSRF-Token")) {
+    headers.set("X-CSRF-Token", csrfToken);
+  }
+
+  const response = await fetch(url, {
+    ...init,
+    method,
+    headers,
+    credentials: "same-origin"
+  });
   if (!response.ok) {
     let message = "요청에 실패했습니다.";
     try {
@@ -1073,6 +1822,9 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
       message = payload.message ?? message;
     } catch {
       message = response.statusText || message;
+    }
+    if (response.status === 401 && !url.startsWith("/api/auth/")) {
+      resetAuthenticatedState();
     }
     throw new Error(message);
   }
@@ -1108,6 +1860,10 @@ function parseManualLine(line: string): WordEntry | null {
 
 function selectedWordbook(): WordbookSummary | undefined {
   return wordbooks.find((book) => book.id === selectedWordbookId);
+}
+
+function currentAnswerSelectionId(): string {
+  return selectedResultId || selectedResult?.id || results[0]?.id || "";
 }
 
 function groupedWordbooks(): WordbookGroup[] {
@@ -1232,12 +1988,30 @@ function modeLabel(mode: TestMode): string {
   return "랜덤";
 }
 
+function answerDetailPath(id: string): string {
+  return `/answers/${encodeURIComponent(id)}`;
+}
+
+function tabForPage(value: PageKey): TabKey {
+  return value === "answerDetail" ? "answers" : value;
+}
+
+function pageLabel(value: PageKey): string {
+  if (value === "answerDetail") {
+    return "정답지 상세";
+  }
+  return tabLabel(tabForPage(value));
+}
+
 function tabLabel(value: TabKey): string {
   if (value === "add") {
     return "추가";
   }
   if (value === "manage") {
     return "관리";
+  }
+  if (value === "mypage") {
+    return "내 페이지";
   }
   if (value === "groups") {
     return "그룹관리";

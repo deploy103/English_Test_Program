@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
+  AdminWordbookSummary,
   AnswerEntry,
   AnswerFormat,
   ResultSummary,
@@ -17,6 +18,9 @@ import type {
 
 const DEFAULT_DATA_DIR = path.resolve(process.cwd(), "data");
 const DEFAULT_GROUP_NAME = "기본 그룹";
+const MAX_COMPLETED_RESULTS = 20;
+const MAX_WORDS_PER_BOOK = 5000;
+const MAX_WORD_CELL_LENGTH = 200;
 
 export const DATA_DIR = path.resolve(process.env.WORD_TEST_DATA_DIR || DEFAULT_DATA_DIR);
 export const WORDBOOK_DIR = path.join(DATA_DIR, "wordbooks");
@@ -25,13 +29,13 @@ export const RESULT_DIR = path.join(DATA_DIR, "results");
 export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 
 interface CreateWordbookInput {
+  ownerId: string;
   name: string;
   group?: string;
   description?: string;
   words: WordEntry[];
   source: WordbookSource;
   sourceFilename?: string;
-  uploadPath?: string;
 }
 
 interface UpdateWordbookInput {
@@ -48,6 +52,7 @@ interface LoadedWordbookJson {
 }
 
 interface StartTestInput {
+  ownerId: string;
   wordbookId: string;
   questionCount: number;
   mode: TestMode;
@@ -69,6 +74,7 @@ export function badRequest(message: string): never {
 
 export async function initializeStorage(): Promise<void> {
   await ensureDataDirs();
+  await pruneCompletedResults();
 }
 
 export async function ensureDataDirs(): Promise<void> {
@@ -78,6 +84,17 @@ export async function ensureDataDirs(): Promise<void> {
     fs.mkdir(RESULT_DIR, { recursive: true }),
     fs.mkdir(UPLOAD_DIR, { recursive: true })
   ]);
+}
+
+export async function adoptLegacyDataForOwner(ownerId: string): Promise<void> {
+  const owner = normalizeOwnerId(ownerId);
+  await Promise.all([
+    adoptLegacyWordbooks(owner),
+    adoptLegacyGroups(owner),
+    adoptLegacyResults(owner)
+  ]);
+  await ensureGroupsForWordbooks(owner);
+  await pruneCompletedResults(owner);
 }
 
 export function normalizeWords(raw: unknown): WordEntry[] {
@@ -101,8 +118,15 @@ export function normalizeWords(raw: unknown): WordEntry[] {
     const english = normalizeCell(lower.get("english") ?? lower.get("en"));
     const korean = normalizeCell(lower.get("korean") ?? lower.get("ko"));
 
+    if (english.length > MAX_WORD_CELL_LENGTH || korean.length > MAX_WORD_CELL_LENGTH) {
+      badRequest(`단어와 뜻은 각각 ${MAX_WORD_CELL_LENGTH}자 이하로 입력하세요.`);
+    }
+
     if (english && korean) {
       words.push({ english, korean });
+      if (words.length > MAX_WORDS_PER_BOOK) {
+        badRequest(`단어장은 최대 ${MAX_WORDS_PER_BOOK}개 단어까지만 저장할 수 있습니다.`);
+      }
     }
   }
 
@@ -110,12 +134,12 @@ export function normalizeWords(raw: unknown): WordEntry[] {
 }
 
 export async function loadWordsFromJsonFile(filePath: string): Promise<WordEntry[]> {
-  const raw = await readJson(filePath);
+  const raw = await readUploadedJson(filePath);
   return normalizeWords(raw);
 }
 
 export async function loadWordbookFromJsonFile(filePath: string): Promise<LoadedWordbookJson> {
-  const raw = await readJson(filePath);
+  const raw = await readUploadedJson(filePath);
   const record = isRecord(raw) ? raw : {};
 
   return {
@@ -127,6 +151,7 @@ export async function loadWordbookFromJsonFile(filePath: string): Promise<Loaded
 }
 
 export async function createWordbook(input: CreateWordbookInput): Promise<WordbookSummary> {
+  const ownerId = normalizeOwnerId(input.ownerId);
   const words = normalizeWords(input.words);
   if (words.length === 0) {
     badRequest("english/korean 단어가 1개 이상 필요합니다.");
@@ -135,17 +160,17 @@ export async function createWordbook(input: CreateWordbookInput): Promise<Wordbo
   const name = normalizeName(input.name);
   const now = new Date().toISOString();
   const group = normalizeGroup(input.group);
-  await ensureGroupByName(group);
+  await ensureGroupByName(group, ownerId);
 
   const record: WordbookRecord = {
     id: crypto.randomUUID(),
+    ownerId,
     name,
     group,
     description: normalizeDescription(input.description),
     words,
     source: input.source,
     sourceFilename: input.sourceFilename,
-    uploadPath: input.uploadPath,
     createdAt: now,
     updatedAt: now
   };
@@ -154,60 +179,86 @@ export async function createWordbook(input: CreateWordbookInput): Promise<Wordbo
   return summarizeWordbook(record);
 }
 
-export async function listWordbooks(): Promise<WordbookSummary[]> {
-  await ensureGroupsForWordbooks();
+export async function listWordbooks(ownerId: string): Promise<WordbookSummary[]> {
+  const owner = normalizeOwnerId(ownerId);
+  await ensureGroupsForWordbooks(owner);
   const records = await readRecords<WordbookRecord>(WORDBOOK_DIR);
   return records
+    .filter((record) => record.ownerId === owner)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map(summarizeWordbook);
 }
 
-export async function listGroups(): Promise<WordbookGroupSummary[]> {
-  await ensureGroupsForWordbooks();
+export async function listAllWordbooksForAdmin(): Promise<AdminWordbookSummary[]> {
+  const records = await readRecords<WordbookRecord>(WORDBOOK_DIR);
+  return records
+    .filter((record) => Boolean(record.ownerId))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map(summarizeWordbook);
+}
+
+export async function getWordbookForAdmin(id: string): Promise<WordbookRecord> {
+  const record = await readRecord<WordbookRecord>(wordbookPath(id), "단어장을 찾을 수 없습니다.");
+  if (!record.ownerId) {
+    throw new HttpError(404, "단어장을 찾을 수 없습니다.");
+  }
+  return record;
+}
+
+export async function listGroups(ownerId: string): Promise<WordbookGroupSummary[]> {
+  const owner = normalizeOwnerId(ownerId);
+  await ensureGroupsForWordbooks(owner);
   const [groups, wordbooks] = await Promise.all([
     readRecords<WordbookGroupRecord>(GROUP_DIR),
     readRecords<WordbookRecord>(WORDBOOK_DIR)
   ]);
-  return summarizeGroups(groups, wordbooks);
+  return summarizeGroups(
+    groups.filter((group) => group.ownerId === owner),
+    wordbooks.filter((book) => book.ownerId === owner)
+  );
 }
 
-export async function createGroup(name: string): Promise<WordbookGroupSummary> {
+export async function createGroup(name: string, ownerId: string): Promise<WordbookGroupSummary> {
+  const owner = normalizeOwnerId(ownerId);
   const normalized = normalizeGroup(name);
-  await ensureGroupsForWordbooks();
-  await assertUniqueGroupName(normalized);
+  await ensureGroupsForWordbooks(owner);
+  await assertUniqueGroupName(normalized, owner);
 
   const now = new Date().toISOString();
   const record: WordbookGroupRecord = {
     id: crypto.randomUUID(),
+    ownerId: owner,
     name: normalized,
     createdAt: now,
     updatedAt: now
   };
 
   await writeJson(groupPath(record.id), record);
-  const groups = await listGroups();
+  const groups = await listGroups(owner);
   return groups.find((group) => group.id === record.id) ?? summarizeGroups([record], [])[0];
 }
 
-export async function renameGroup(id: string, name: string): Promise<WordbookGroupSummary> {
-  const record = await getGroupRecord(id);
+export async function renameGroup(id: string, name: string, ownerId: string): Promise<WordbookGroupSummary> {
+  const owner = normalizeOwnerId(ownerId);
+  const record = await getGroupRecord(id, owner);
   const previousName = normalizeGroup(record.name);
   const nextName = normalizeGroup(name);
 
   if (previousName !== nextName) {
-    await assertUniqueGroupName(nextName, id);
+    await assertUniqueGroupName(nextName, owner, id);
     record.name = nextName;
     record.updatedAt = new Date().toISOString();
     await writeJson(groupPath(id), record);
-    await moveWordbooksToGroup(previousName, nextName);
+    await moveWordbooksToGroup(previousName, nextName, owner);
   }
 
-  const groups = await listGroups();
+  const groups = await listGroups(owner);
   return groups.find((group) => group.id === id) ?? summarizeGroups([record], [])[0];
 }
 
-export async function deleteGroup(id: string): Promise<void> {
-  const record = await getGroupRecord(id);
+export async function deleteGroup(id: string, ownerId: string): Promise<void> {
+  const owner = normalizeOwnerId(ownerId);
+  const record = await getGroupRecord(id, owner);
   const groupName = normalizeGroup(record.name);
   const [wordbooks, groups] = await Promise.all([
     readRecords<WordbookRecord>(WORDBOOK_DIR),
@@ -220,20 +271,24 @@ export async function deleteGroup(id: string): Promise<void> {
 
   await Promise.all([
     ...wordbooks
-      .filter((book) => normalizeGroup(book.group) === groupName)
+      .filter((book) => book.ownerId === owner && normalizeGroup(book.group) === groupName)
       .map((book) => fs.rm(wordbookPath(book.id), { force: true })),
     ...groups
-      .filter((group) => normalizeGroup(group.name) === groupName)
+      .filter((group) => group.ownerId === owner && normalizeGroup(group.name) === groupName)
       .map((group) => fs.rm(groupPath(group.id), { force: true }))
   ]);
 }
 
-export async function getWordbook(id: string): Promise<WordbookRecord> {
-  return readRecord<WordbookRecord>(wordbookPath(id), "단어장을 찾을 수 없습니다.");
+export async function getWordbook(id: string, ownerId: string): Promise<WordbookRecord> {
+  const owner = normalizeOwnerId(ownerId);
+  const record = await readRecord<WordbookRecord>(wordbookPath(id), "단어장을 찾을 수 없습니다.");
+  assertOwner(record.ownerId, owner, "단어장을 찾을 수 없습니다.");
+  return record;
 }
 
-export async function updateWordbook(id: string, input: UpdateWordbookInput): Promise<WordbookSummary> {
-  const record = await getWordbook(id);
+export async function updateWordbook(id: string, input: UpdateWordbookInput, ownerId: string): Promise<WordbookSummary> {
+  const owner = normalizeOwnerId(ownerId);
+  const record = await getWordbook(id, owner);
 
   if (typeof input.name === "string") {
     record.name = normalizeName(input.name);
@@ -248,15 +303,18 @@ export async function updateWordbook(id: string, input: UpdateWordbookInput): Pr
   }
 
   record.updatedAt = new Date().toISOString();
+  await ensureGroupByName(record.group, owner);
   await writeJson(wordbookPath(id), record);
   return summarizeWordbook(record);
 }
 
-export async function deleteWordbook(id: string): Promise<void> {
+export async function deleteWordbook(id: string, ownerId: string): Promise<void> {
+  await getWordbook(id, ownerId);
   await fs.rm(wordbookPath(id), { force: true });
 }
 
 export async function startTest(input: StartTestInput): Promise<TestResult> {
+  const ownerId = normalizeOwnerId(input.ownerId);
   if (!["ko", "en", "rand"].includes(input.mode)) {
     badRequest("출제 모드가 올바르지 않습니다.");
   }
@@ -269,12 +327,13 @@ export async function startTest(input: StartTestInput): Promise<TestResult> {
     badRequest("표시 시간은 3초 이상 15초 이하만 가능합니다.");
   }
 
-  const wordbook = await getWordbook(input.wordbookId);
+  const wordbook = await getWordbook(input.wordbookId, ownerId);
   const selected = takeWordsWithRepeats(wordbook.words, input.questionCount);
   const answers = selected.map((word, index) => makeAnswerEntry(word, index + 1, input.mode));
   const now = new Date().toISOString();
   const result: TestResult = {
     id: crypto.randomUUID(),
+    ownerId,
     wordbookId: wordbook.id,
     wordbookName: wordbook.name,
     questionCount: answers.length,
@@ -288,24 +347,28 @@ export async function startTest(input: StartTestInput): Promise<TestResult> {
   return result;
 }
 
-export async function markResultComplete(id: string): Promise<TestResult> {
-  const result = await getResult(id);
+export async function markResultComplete(id: string, ownerId: string): Promise<TestResult> {
+  const result = await getResult(id, ownerId);
   result.completedAt = result.completedAt ?? new Date().toISOString();
   await writeJson(resultPath(id), result);
+  await pruneCompletedResults(result.ownerId);
   return result;
 }
 
-export async function deleteResult(id: string): Promise<void> {
+export async function deleteResult(id: string, ownerId: string): Promise<void> {
+  await getResult(id, ownerId);
   await fs.rm(resultPath(id), { force: true });
 }
 
-export async function listResults(): Promise<ResultSummary[]> {
+export async function listResults(ownerId: string): Promise<ResultSummary[]> {
+  const owner = normalizeOwnerId(ownerId);
   const records = await readRecords<TestResult>(RESULT_DIR);
   return records
-    .filter((result) => Boolean(result.completedAt))
+    .filter((result) => result.ownerId === owner && Boolean(result.completedAt))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((result) => ({
       id: result.id,
+      ownerId: result.ownerId,
       wordbookId: result.wordbookId,
       wordbookName: result.wordbookName,
       questionCount: result.questionCount,
@@ -316,8 +379,37 @@ export async function listResults(): Promise<ResultSummary[]> {
     }));
 }
 
-export async function getResult(id: string): Promise<TestResult> {
-  return readRecord<TestResult>(resultPath(id), "정답지를 찾을 수 없습니다.");
+export async function getResult(id: string, ownerId: string): Promise<TestResult> {
+  const owner = normalizeOwnerId(ownerId);
+  const result = await readRecord<TestResult>(resultPath(id), "정답지를 찾을 수 없습니다.");
+  assertOwner(result.ownerId, owner, "정답지를 찾을 수 없습니다.");
+  return result;
+}
+
+async function pruneCompletedResults(ownerId?: string): Promise<void> {
+  const completedResults = (await readRecords<TestResult>(RESULT_DIR))
+    .filter((result) => Boolean(result.completedAt) && Boolean(result.ownerId))
+    .filter((result) => !ownerId || result.ownerId === ownerId);
+
+  const byOwner = new Map<string, TestResult[]>();
+  for (const result of completedResults) {
+    byOwner.set(result.ownerId, [...(byOwner.get(result.ownerId) ?? []), result]);
+  }
+
+  const removals: Promise<void>[] = [];
+  for (const records of byOwner.values()) {
+    if (records.length <= MAX_COMPLETED_RESULTS) {
+      continue;
+    }
+
+    const removeCount = records.length - MAX_COMPLETED_RESULTS;
+    const oldestResults = records
+      .sort((a, b) => resultStoredAt(a).localeCompare(resultStoredAt(b)) || a.id.localeCompare(b.id))
+      .slice(0, removeCount);
+    removals.push(...oldestResults.map((result) => fs.rm(resultPath(result.id), { force: true })));
+  }
+
+  await Promise.all(removals);
 }
 
 export function formatResult(result: TestResult, format: AnswerFormat): string {
@@ -349,7 +441,7 @@ export function formatResult(result: TestResult, format: AnswerFormat): string {
     ])
   ];
 
-  return `\ufeff${rows.map((row) => row.map(escapeCsv).join(",")).join("\n")}`;
+  return `\ufeff${rows.map((row) => row.map(escapeCsvCell).join(",")).join("\n")}`;
 }
 
 export function contentTypeFor(format: AnswerFormat): string {
@@ -385,6 +477,7 @@ export async function safeRemove(filePath: string | undefined): Promise<void> {
 function summarizeWordbook(record: WordbookRecord): WordbookSummary {
   return {
     id: record.id,
+    ownerId: record.ownerId,
     name: record.name,
     group: normalizeGroup(record.group),
     description: record.description,
@@ -410,6 +503,39 @@ async function readRecords<T>(dir: string): Promise<T[]> {
   return records;
 }
 
+async function adoptLegacyWordbooks(ownerId: string): Promise<void> {
+  const records = await readRecords<WordbookRecord>(WORDBOOK_DIR);
+  await Promise.all(records.map(async (record) => {
+    if (record.ownerId) {
+      return;
+    }
+    record.ownerId = ownerId;
+    await writeJson(wordbookPath(record.id), record);
+  }));
+}
+
+async function adoptLegacyGroups(ownerId: string): Promise<void> {
+  const records = await readRecords<WordbookGroupRecord>(GROUP_DIR);
+  await Promise.all(records.map(async (record) => {
+    if (record.ownerId) {
+      return;
+    }
+    record.ownerId = ownerId;
+    await writeJson(groupPath(record.id), record);
+  }));
+}
+
+async function adoptLegacyResults(ownerId: string): Promise<void> {
+  const records = await readRecords<TestResult>(RESULT_DIR);
+  await Promise.all(records.map(async (record) => {
+    if (record.ownerId) {
+      return;
+    }
+    record.ownerId = ownerId;
+    await writeJson(resultPath(record.id), record);
+  }));
+}
+
 async function readRecord<T>(filePath: string, missingMessage: string): Promise<T> {
   try {
     return (await readJson(filePath)) as T;
@@ -424,6 +550,17 @@ async function readRecord<T>(filePath: string, missingMessage: string): Promise<
 async function readJson(filePath: string): Promise<unknown> {
   const text = await fs.readFile(filePath, "utf-8");
   return JSON.parse(text) as unknown;
+}
+
+async function readUploadedJson(filePath: string): Promise<unknown> {
+  try {
+    return await readJson(filePath);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      badRequest("JSON 형식이 올바르지 않습니다.");
+    }
+    throw error;
+  }
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
@@ -450,6 +587,17 @@ function resultPath(id: string): string {
 function assertSafeId(id: string): void {
   if (!/^[a-f0-9-]{36}$/i.test(id)) {
     throw new HttpError(404, "항목을 찾을 수 없습니다.");
+  }
+}
+
+function normalizeOwnerId(ownerId: string): string {
+  assertSafeId(ownerId);
+  return ownerId;
+}
+
+function assertOwner(actualOwnerId: string | undefined, expectedOwnerId: string, message: string): void {
+  if (actualOwnerId !== expectedOwnerId) {
+    throw new HttpError(404, message);
   }
 }
 
@@ -524,20 +672,22 @@ function normalizeGroup(value: string | undefined): string {
   return group;
 }
 
-async function ensureGroupsForWordbooks(): Promise<void> {
+async function ensureGroupsForWordbooks(ownerId: string): Promise<void> {
   const wordbooks = await readRecords<WordbookRecord>(WORDBOOK_DIR);
-  const groups = new Set(wordbooks.map((book) => normalizeGroup(book.group)));
+  const groups = new Set(wordbooks
+    .filter((book) => book.ownerId === ownerId)
+    .map((book) => normalizeGroup(book.group)));
   groups.add(DEFAULT_GROUP_NAME);
 
   for (const group of groups) {
-    await ensureGroupByName(group);
+    await ensureGroupByName(group, ownerId);
   }
 }
 
-async function ensureGroupByName(name: string): Promise<WordbookGroupRecord> {
+async function ensureGroupByName(name: string, ownerId: string): Promise<WordbookGroupRecord> {
   const normalized = normalizeGroup(name);
   const records = await readRecords<WordbookGroupRecord>(GROUP_DIR);
-  const existing = records.find((record) => normalizeGroup(record.name) === normalized);
+  const existing = records.find((record) => record.ownerId === ownerId && normalizeGroup(record.name) === normalized);
   if (existing) {
     return existing;
   }
@@ -545,6 +695,7 @@ async function ensureGroupByName(name: string): Promise<WordbookGroupRecord> {
   const now = new Date().toISOString();
   const record: WordbookGroupRecord = {
     id: crypto.randomUUID(),
+    ownerId,
     name: normalized,
     createdAt: now,
     updatedAt: now
@@ -553,25 +704,31 @@ async function ensureGroupByName(name: string): Promise<WordbookGroupRecord> {
   return record;
 }
 
-async function getGroupRecord(id: string): Promise<WordbookGroupRecord> {
-  return readRecord<WordbookGroupRecord>(groupPath(id), "그룹을 찾을 수 없습니다.");
+async function getGroupRecord(id: string, ownerId: string): Promise<WordbookGroupRecord> {
+  const record = await readRecord<WordbookGroupRecord>(groupPath(id), "그룹을 찾을 수 없습니다.");
+  assertOwner(record.ownerId, ownerId, "그룹을 찾을 수 없습니다.");
+  return record;
 }
 
-async function assertUniqueGroupName(name: string, exceptId?: string): Promise<void> {
+async function assertUniqueGroupName(name: string, ownerId: string, exceptId?: string): Promise<void> {
   const normalized = normalizeGroup(name);
   const records = await readRecords<WordbookGroupRecord>(GROUP_DIR);
-  const duplicate = records.some((record) => record.id !== exceptId && normalizeGroup(record.name) === normalized);
+  const duplicate = records.some((record) => (
+    record.ownerId === ownerId &&
+    record.id !== exceptId &&
+    normalizeGroup(record.name) === normalized
+  ));
   if (duplicate) {
     badRequest("이미 같은 이름의 그룹이 있습니다.");
   }
 }
 
-async function moveWordbooksToGroup(previousName: string, nextName: string): Promise<void> {
+async function moveWordbooksToGroup(previousName: string, nextName: string, ownerId: string): Promise<void> {
   const records = await readRecords<WordbookRecord>(WORDBOOK_DIR);
   const now = new Date().toISOString();
 
   await Promise.all(records.map(async (record) => {
-    if (normalizeGroup(record.group) !== previousName) {
+    if (record.ownerId !== ownerId || normalizeGroup(record.group) !== previousName) {
       return;
     }
 
@@ -599,6 +756,7 @@ function summarizeGroups(groups: WordbookGroupRecord[], wordbooks: WordbookRecor
 
       return {
         id: group.id,
+        ownerId: group.ownerId,
         name,
         wordbookCount: books.length,
         wordCount: books.reduce((sum, book) => sum + book.words.length, 0),
@@ -641,6 +799,15 @@ function escapeCsv(value: string): string {
     return value;
   }
   return `"${value.replaceAll('"', '""')}"`;
+}
+
+function escapeCsvCell(value: string): string {
+  const safe = /^[=+\-@]/.test(value.trimStart()) ? `'${value}` : value;
+  return escapeCsv(safe);
+}
+
+function resultStoredAt(result: TestResult): string {
+  return result.completedAt ?? result.createdAt;
 }
 
 function formatDate(value: string): string {

@@ -183,6 +183,7 @@ a {
 .page-header p,
 .panel h3,
 .book-detail h3,
+.answer-index h3,
 .answer-toolbar h3 {
   margin: 0;
 }
@@ -214,6 +215,8 @@ a {
 }
 
 .nav-button {
+  display: grid;
+  align-items: center;
   min-height: 46px;
   padding: 0 14px;
   text-align: left;
@@ -300,6 +303,75 @@ a {
   padding: 76px 18px 18px;
 }
 
+.auth-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel {
+  display: grid;
+  width: min(480px, 100%);
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid #2d3539;
+  border-radius: 8px;
+  background: #181d20;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.auth-brand h1,
+.auth-brand p {
+  margin: 0;
+}
+
+.auth-brand h1 {
+  font-size: 24px;
+}
+
+.auth-brand p,
+.auth-hint {
+  color: #9ca8a2;
+  font-size: 13px;
+}
+
+.auth-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auth-switch button {
+  min-height: 42px;
+  border: 1px solid #30383b;
+  border-radius: 8px;
+  background: #101315;
+  color: #d9e0dd;
+  font-weight: 900;
+}
+
+.auth-switch button.is-active {
+  border-color: rgba(66, 211, 146, 0.8);
+  background: rgba(66, 211, 146, 0.14);
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-hint {
+  margin: -4px 0 0;
+  line-height: 1.45;
+}
+
 .toast {
   position: fixed;
   top: 78px;
@@ -370,7 +442,9 @@ a {
 .add-grid,
 .answers-layout,
 .manage-layout,
-.groups-layout {
+.groups-layout,
+.mypage-layout,
+.admin-grid {
   display: grid;
   align-items: start;
   gap: 16px;
@@ -396,6 +470,22 @@ a {
   grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
 }
 
+.mypage-layout {
+  grid-template-columns: minmax(260px, 340px) minmax(280px, 420px) minmax(0, 1fr);
+}
+
+.admin-dashboard {
+  margin-top: 22px;
+}
+
+.admin-header {
+  margin-bottom: 14px;
+}
+
+.admin-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .panel {
   min-width: 0;
   padding: 18px;
@@ -414,6 +504,111 @@ a {
 .panel form {
   display: grid;
   gap: 16px;
+}
+
+.profile-panel,
+.password-panel,
+.management-panel,
+.admin-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.profile-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.profile-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #293135;
+}
+
+.profile-list dt,
+.profile-list dd {
+  margin: 0;
+}
+
+.profile-list dt {
+  color: #9ca8a2;
+  font-size: 13px;
+}
+
+.profile-list dd {
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-weight: 800;
+}
+
+.management-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.account-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #293135;
+}
+
+.admin-panel {
+  align-content: start;
+  max-height: 560px;
+  overflow: auto;
+}
+
+.admin-wordbook-detail {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.admin-detail-meta {
+  color: #9ca8a2;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.admin-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #30383b;
+  border-radius: 8px;
+  background: #12171a;
+}
+
+.admin-row + .admin-row {
+  margin-top: 8px;
+}
+
+.admin-row div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.admin-row strong,
+.admin-row span {
+  overflow-wrap: anywhere;
+}
+
+.admin-row span,
+.admin-row small {
+  color: #9ca8a2;
+  font-size: 12px;
+}
+
+.admin-row small {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .field {
@@ -541,6 +736,12 @@ textarea:focus {
   place-items: center;
   padding: 0 16px;
   font-weight: 900;
+}
+
+.mini-button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .primary-button {
@@ -746,9 +947,43 @@ textarea:focus {
   margin: 0;
 }
 
-.answer-list {
+.answer-list-page,
+.answer-detail-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.answer-index {
+  display: grid;
+  gap: 14px;
+}
+
+.answer-index-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.answer-index-top span {
+  flex: 0 0 auto;
+  color: #9ca8a2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.answer-index-top h3,
+.answer-toolbar h3 {
+  margin-bottom: 0;
+}
+
+.answer-index .answer-list {
   max-height: calc(100vh - 140px);
   overflow: auto;
+}
+
+.answer-list-page .answer-list {
+  max-height: none;
 }
 
 .answer-detail {
@@ -767,6 +1002,75 @@ textarea:focus {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.answer-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.answer-summary span {
+  display: inline-grid;
+  min-height: 32px;
+  place-items: center;
+  padding: 0 10px;
+  border: 1px solid #30383b;
+  border-radius: 8px;
+  background: #12171a;
+  color: #c7d0cc;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.answer-card-list {
+  display: none;
+}
+
+.answer-card {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #30383b;
+  border-radius: 8px;
+  background: #12171a;
+}
+
+.answer-number {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid rgba(255, 189, 91, 0.45);
+  border-radius: 8px;
+  color: #ffbd5b;
+  font-weight: 900;
+}
+
+.answer-card-body {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.answer-card-body div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.answer-card-body span {
+  color: #9ca8a2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.answer-card-body strong {
+  overflow-wrap: anywhere;
+  color: #fbfdfc;
+  line-height: 1.35;
 }
 
 .answer-table-wrap {
@@ -885,12 +1189,29 @@ textarea:focus {
   .add-grid,
   .answers-layout,
   .manage-layout,
-  .groups-layout {
+  .groups-layout,
+  .mypage-layout,
+  .admin-grid {
     grid-template-columns: 1fr;
   }
 
-  .answer-list {
-    max-height: none;
+  .answer-index {
+    gap: 12px;
+  }
+
+  .answer-detail {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .answer-card-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .answer-table-wrap {
+    display: none;
   }
 }
 
@@ -923,6 +1244,21 @@ textarea:focus {
     width: 100%;
   }
 
+  .answer-index-top {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .download-group {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .download-group .ghost-button {
+    min-width: 0;
+    padding: 0 8px;
+  }
+
   .header-actions {
     display: grid;
   }
@@ -934,8 +1270,23 @@ textarea:focus {
   .metric-row,
   .manage-item,
   .group-card,
-  .group-rename-form {
+  .group-rename-form,
+  .admin-row {
     grid-template-columns: 1fr;
+  }
+
+  .profile-list div {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .profile-list dd,
+  .admin-row small {
+    text-align: left;
+  }
+
+  .mini-button {
+    width: 100%;
   }
 
   .manage-actions {
