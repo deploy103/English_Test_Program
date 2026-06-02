@@ -253,16 +253,30 @@ app.get("/api/admin/library-wordbooks/:id", requireAdmin, asyncRoute(async (requ
   });
 }));
 
-app.post("/api/admin/library-wordbooks/manual", requireAdmin, asyncRoute(async (request, response) => {
-  const body = request.body as { name?: string; group?: string; description?: string; words?: WordEntry[] };
-  const created = await createLibraryWordbook({
-    name: body.name ?? "",
-    group: body.group,
-    description: body.description,
-    words: normalizeWords(body.words)
-  });
-  await appendAuditLog(auditFrom(request, "admin.library_wordbook_create", "success", created.name, created.id));
-  response.status(201).json(created);
+app.post("/api/admin/library-wordbooks/upload", requireAdmin, upload.single("file"), asyncRoute(async (request, response) => {
+  const uploadedPath = request.file?.path;
+  if (!uploadedPath || !request.file) {
+    throw new HttpError(400, "업로드할 JSON 파일을 선택하세요.");
+  }
+
+  try {
+    const parsed = await loadWordbookFromJsonFile(uploadedPath);
+    const submittedName = normalizeOptionalFormText(request.body.name);
+    const submittedGroup = normalizeOptionalFormText(request.body.group);
+    const submittedDescription = normalizeOptionalFormText(request.body.description);
+    const created = await createLibraryWordbook({
+      name: submittedName ?? parsed.name ?? path.parse(request.file.originalname).name,
+      group: submittedGroup ?? parsed.group,
+      description: submittedDescription ?? parsed.description,
+      words: parsed.words
+    });
+    await safeRemove(uploadedPath);
+    await appendAuditLog(auditFrom(request, "admin.library_wordbook_upload", "success", created.name, created.id));
+    response.status(201).json(created);
+  } catch (error) {
+    await safeRemove(uploadedPath);
+    throw error;
+  }
 }));
 
 app.delete("/api/admin/library-wordbooks/:id", requireAdmin, asyncRoute(async (request, response) => {

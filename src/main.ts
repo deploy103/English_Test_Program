@@ -1070,28 +1070,32 @@ function renderAdminLibraryCreateForm(): string {
   return `
     <form class="panel admin-library-form" id="admin-library-form">
       <div class="panel-title-row">
-        <h3>보관소에 단어장 추가</h3>
-        <span class="admin-detail-meta">관리자 전용 DB</span>
+        <h3>보관소 JSON 업로드</h3>
+        <span class="admin-detail-meta">관리자 전용 단어장 DB</span>
       </div>
       <div class="admin-library-fields">
         <label class="field">
           <span>이름</span>
-          <input name="name" type="text" maxlength="80" required />
+          <input name="name" type="text" maxlength="80" placeholder="비우면 JSON 또는 파일명 사용" />
         </label>
         <label class="field">
           <span>그룹</span>
-          <input name="group" type="text" maxlength="60" value="${escapeAttribute(DEFAULT_GROUP_NAME)}" />
+          <input name="group" type="text" maxlength="60" placeholder="비우면 JSON 값 사용" />
         </label>
       </div>
       <label class="field">
         <span>메모</span>
         <input name="description" type="text" maxlength="500" />
       </label>
-      <label class="field textarea-field compact-textarea">
-        <span>단어</span>
-        <textarea name="words" rows="7" spellcheck="false" placeholder="apple = 사과&#10;valid, 타당한&#10;take place&#9;일어나다"></textarea>
+      <div class="json-guide">
+        <strong>JSON 기준</strong>
+        <code>{ "name": "수능 단어", "group": "공통", "words": [{ "english": "apple", "korean": "사과" }] }</code>
+      </div>
+      <label class="file-field">
+        <input name="file" type="file" accept="application/json,.json" required />
+        <span>보관소 JSON 파일 선택</span>
       </label>
-      <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>보관소에 저장</button>
+      <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>JSON 업로드</button>
     </form>
   `;
 }
@@ -2114,25 +2118,13 @@ async function deleteAdminUserById(id: string): Promise<void> {
 }
 
 async function createAdminLibraryWordbook(formData: FormData): Promise<void> {
-  const words = parseManualWords(String(formData.get("words") ?? ""));
-  if (words.length === 0) {
-    showToast("입력된 단어를 확인하세요.");
-    return;
-  }
-
   await withBusy(async () => {
-    const created = await api<LibraryWordbookSummary>("/api/admin/library-wordbooks/manual", {
+    const created = await api<LibraryWordbookSummary>("/api/admin/library-wordbooks/upload", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: String(formData.get("name") ?? ""),
-        group: String(formData.get("group") ?? ""),
-        description: String(formData.get("description") ?? ""),
-        words
-      })
+      body: formData
     });
     selectedAdminLibraryWordbook = null;
-    showToast(`${created.name}을 보관소에 저장했습니다.`);
+    showToast(`${created.name}을 보관소에 업로드했습니다.`);
     await refreshAll();
   });
 }

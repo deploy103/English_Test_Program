@@ -1449,10 +1449,6 @@ a {
   gap: 14px;
 }
 
-.compact-textarea textarea {
-  min-height: 160px;
-}
-
 .admin-library-row {
   align-items: start;
 }
