@@ -517,7 +517,40 @@ function renderTopActions(): string {
 }
 
 function renderNavButton(key: TabKey, label: string): string {
-  return `<a class="nav-button ${tab === key ? "is-active" : ""}" href="${TAB_ROUTES[key]}" data-route data-tab="${key}">${label}</a>`;
+  return `
+    <a class="nav-button ${tab === key ? "is-active" : ""}" href="${TAB_ROUTES[key]}" data-route data-tab="${key}">
+      <span class="nav-icon" aria-hidden="true">${navIcon(key)}</span>
+      <span class="nav-label">${label}</span>
+    </a>
+  `;
+}
+
+function navIcon(key: TabKey): string {
+  if (key === "home") {
+    return `<svg viewBox="0 0 24 24"><path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z" /></svg>`;
+  }
+  if (key === "test") {
+    return `<svg viewBox="0 0 24 24"><path d="M8 4h8l1 3h2v16H5V7h2z" /><path d="M9 12h6" /><path d="M9 16h4" /></svg>`;
+  }
+  if (key === "memorize") {
+    return `<svg viewBox="0 0 24 24"><path d="M7 5h10a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3z" /><path d="M8 10h8" /><path d="M8 14h5" /></svg>`;
+  }
+  if (key === "add") {
+    return `<svg viewBox="0 0 24 24"><path d="M12 5v14" /><path d="M5 12h14" /></svg>`;
+  }
+  if (key === "manage") {
+    return `<svg viewBox="0 0 24 24"><path d="M6 4h11a2 2 0 0 1 2 2v16H7a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1z" /><path d="M9 8h6" /><path d="M9 12h7" /></svg>`;
+  }
+  if (key === "groups") {
+    return `<svg viewBox="0 0 24 24"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M16 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M3 20a5 5 0 0 1 10 0" /><path d="M12 20a5 5 0 0 1 9 0" /></svg>`;
+  }
+  if (key === "answers") {
+    return `<svg viewBox="0 0 24 24"><path d="M5 19V5" /><path d="M5 19h16" /><path d="M9 15v-4" /><path d="M13 15V8" /><path d="M17 15v-6" /></svg>`;
+  }
+  if (key === "settings") {
+    return `<svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" /><path d="M12 3v3" /><path d="M12 18v3" /><path d="M4.8 4.8l2.1 2.1" /><path d="m17.1 17.1 2.1 2.1" /><path d="M3 12h3" /><path d="M18 12h3" /><path d="m4.8 19.2 2.1-2.1" /><path d="m17.1 6.9 2.1-2.1" /></svg>`;
+  }
+  return `<svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6z" /><path d="M9 12l2 2 4-5" /></svg>`;
 }
 
 function renderHomeTab(): string {
