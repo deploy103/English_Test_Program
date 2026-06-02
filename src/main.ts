@@ -1277,7 +1277,7 @@ function renderActiveTest(): string {
     <section class="test-stage">
       <div class="stage-top">
         <span>${progress}</span>
-        <span>${secondsLeft}s</span>
+        <span data-time-left>${secondsLeft}s</span>
       </div>
       <div class="progress" aria-label="진행률">
         <progress value="${progressPercent}" max="100"></progress>
@@ -1286,7 +1286,7 @@ function renderActiveTest(): string {
         <div class="prompt-word">${escapeHtml(entry.prompt)}</div>
       </div>
       <div class="time-gauge" aria-label="남은 시간">
-        <progress value="${timePercent}" max="100"></progress>
+        <progress data-time-progress value="${timePercent}" max="100"></progress>
       </div>
     </section>
   `;
@@ -1321,7 +1321,7 @@ function renderActiveMemorize(): string {
     <section class="test-stage memorize-stage">
       <div class="stage-top">
         <span>${escapeHtml(activeMemorize.wordbookName)} · ${progress}</span>
-        <span>${secondsLeft}s</span>
+        <span data-time-left>${secondsLeft}s</span>
       </div>
       <div class="progress" aria-label="진행률">
         <progress value="${progressPercent}" max="100"></progress>
@@ -1333,7 +1333,7 @@ function renderActiveMemorize(): string {
         </div>
       </div>
       <div class="time-gauge" aria-label="남은 시간">
-        <progress value="${timePercent}" max="100"></progress>
+        <progress data-time-progress value="${timePercent}" max="100"></progress>
       </div>
     </section>
   `;
@@ -2082,7 +2082,7 @@ function showQuestion(index: number): void {
       return;
     }
 
-    render();
+    updateActiveTimerView(activeTest.remainingMs, activeTest.result.displaySeconds * 1000);
   }, 100);
 }
 
@@ -2187,8 +2187,22 @@ function runMemorizeTimer(durationMs: number, onDone: () => void): void {
       return;
     }
 
-    render();
+    updateActiveTimerView(activeMemorize.remainingMs, durationMs);
   }, 100);
+}
+
+function updateActiveTimerView(remainingMs: number, durationMs: number): void {
+  const secondsLeft = Math.ceil(remainingMs / 1000);
+  const timePercent = Math.max(0, Math.min(100, (remainingMs / durationMs) * 100));
+  const timeLeft = document.querySelector<HTMLElement>("[data-time-left]");
+  const timeProgress = document.querySelector<HTMLProgressElement>("[data-time-progress]");
+
+  if (timeLeft) {
+    timeLeft.textContent = `${secondsLeft}s`;
+  }
+  if (timeProgress) {
+    timeProgress.value = timePercent;
+  }
 }
 
 function finishActiveMemorize(): void {
