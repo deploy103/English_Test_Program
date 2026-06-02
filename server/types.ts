@@ -38,6 +38,13 @@ export interface PublicUser {
   lastLoginAt?: string;
 }
 
+export interface AdminUserSummary extends PublicUser {
+  wordbookCount: number;
+  wordCount: number;
+  groupCount: number;
+  resultCount: number;
+}
+
 export interface SessionRecord {
   id: string;
   userId: string;
@@ -109,6 +116,26 @@ export interface AdminWordbookSummary extends WordbookSummary {
   ownerLoginId?: string;
   ownerEmail?: string;
   ownerName?: string;
+}
+
+export interface LibraryWordbookRecord {
+  id: string;
+  name: string;
+  group: string;
+  description: string;
+  words: WordEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LibraryWordbookSummary {
+  id: string;
+  name: string;
+  group: string;
+  description: string;
+  wordCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface WordbookGroupRecord {

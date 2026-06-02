@@ -8,6 +8,7 @@ import {
   appendAuditLog,
   changePassword,
   clearSessionCookie,
+  deleteUserForAdmin,
   destroySession,
   getAuthenticatedSession,
   getUserMapByIds,
@@ -22,6 +23,7 @@ import {
   revokeOtherUserSessions,
   revokeUserSession,
   rotateCsrfToken,
+  updateUserForAdmin,
   usersExist,
   verifyCsrfToken
 } from "./auth.js";
@@ -29,20 +31,27 @@ import {
   adoptLegacyDataForOwner,
   HttpError,
   UPLOAD_DIR,
+  assignLibraryWordbookToUser,
   contentTypeFor,
   createGroup,
+  createLibraryWordbook,
   createWordbook,
   deleteGroup,
+  deleteLibraryWordbook,
+  deleteOwnedDataForUser,
   deleteResult,
   deleteWordbook,
   extensionFor,
   formatResult,
+  getLibraryWordbook,
   getResult,
   getWordbook,
   getWordbookForAdmin,
   initializeStorage,
   listAllWordbooksForAdmin,
   listGroups,
+  listLibraryWordbooks,
+  listOwnerLearningStats,
   listResults,
   listWordbooks,
   loadWordbookFromJsonFile,
@@ -200,11 +209,84 @@ app.delete("/api/auth/sessions/:id", asyncRoute(async (request, response) => {
 }));
 
 app.get("/api/admin/users", requireAdmin, asyncRoute(async (_request, response) => {
-  response.json(await listUsers());
+  const users = await listUsers();
+  const stats = await listOwnerLearningStats(users.map((user) => user.id));
+  response.json(users.map((user) => ({
+    ...user,
+    wordbookCount: stats.get(user.id)?.wordbookCount ?? 0,
+    wordCount: stats.get(user.id)?.wordCount ?? 0,
+    groupCount: stats.get(user.id)?.groupCount ?? 0,
+    resultCount: stats.get(user.id)?.resultCount ?? 0
+  })));
+}));
+
+app.patch("/api/admin/users/:id", requireAdmin, asyncRoute(async (request, response) => {
+  const body = request.body as { loginId?: string; email?: string; name?: string; role?: "admin" | "user" };
+  const user = await updateUserForAdmin(authOf(request).user, request.params.id, {
+    loginId: body.loginId,
+    email: body.email,
+    name: body.name,
+    role: body.role
+  }, requestMetaFrom(request));
+  response.json(user);
+}));
+
+app.delete("/api/admin/users/:id", requireAdmin, asyncRoute(async (request, response) => {
+  const deleted = await deleteUserForAdmin(authOf(request).user, request.params.id, requestMetaFrom(request));
+  await deleteOwnedDataForUser(deleted.id);
+  response.status(204).end();
 }));
 
 app.get("/api/admin/logs", requireAdmin, asyncRoute(async (_request, response) => {
   response.json(await listAuditLogs());
+}));
+
+app.get("/api/admin/library-wordbooks", requireAdmin, asyncRoute(async (_request, response) => {
+  response.json(await listLibraryWordbooks());
+}));
+
+app.get("/api/admin/library-wordbooks/:id", requireAdmin, asyncRoute(async (request, response) => {
+  const wordbook = await getLibraryWordbook(request.params.id);
+  response.json({
+    ...wordbook,
+    wordCount: wordbook.words.length
+  });
+}));
+
+app.post("/api/admin/library-wordbooks/manual", requireAdmin, asyncRoute(async (request, response) => {
+  const body = request.body as { name?: string; group?: string; description?: string; words?: WordEntry[] };
+  const created = await createLibraryWordbook({
+    name: body.name ?? "",
+    group: body.group,
+    description: body.description,
+    words: normalizeWords(body.words)
+  });
+  await appendAuditLog(auditFrom(request, "admin.library_wordbook_create", "success", created.name, created.id));
+  response.status(201).json(created);
+}));
+
+app.delete("/api/admin/library-wordbooks/:id", requireAdmin, asyncRoute(async (request, response) => {
+  await deleteLibraryWordbook(request.params.id);
+  await appendAuditLog(auditFrom(request, "admin.library_wordbook_delete", "success", request.params.id, request.params.id));
+  response.status(204).end();
+}));
+
+app.post("/api/admin/library-wordbooks/:id/assign", requireAdmin, asyncRoute(async (request, response) => {
+  const body = request.body as { targetUserId?: string };
+  const targetUserId = body.targetUserId ?? "";
+  const target = await getUserMapByIds([targetUserId]);
+  if (!target.has(targetUserId)) {
+    throw new HttpError(404, "대상 사용자를 찾을 수 없습니다.");
+  }
+  const assigned = await assignLibraryWordbookToUser({
+    libraryWordbookId: request.params.id,
+    targetUserId
+  });
+  await appendAuditLog({
+    ...auditFrom(request, "admin.library_wordbook_assign", "success", assigned.name, assigned.id),
+    targetUserId
+  });
+  response.status(201).json(assigned);
 }));
 
 app.get("/api/admin/wordbooks", requireAdmin, asyncRoute(async (_request, response) => {

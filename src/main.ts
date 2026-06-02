@@ -95,7 +95,12 @@ interface AddDraft {
   manualWords: string;
 }
 
-interface AdminUserSummary extends CurrentUser {}
+interface AdminUserSummary extends CurrentUser {
+  wordbookCount: number;
+  wordCount: number;
+  groupCount: number;
+  resultCount: number;
+}
 
 interface AdminWordbookSummary extends WordbookSummary {
   ownerLoginId?: string;
@@ -104,6 +109,20 @@ interface AdminWordbookSummary extends WordbookSummary {
 }
 
 interface AdminWordbookDetail extends AdminWordbookSummary {
+  words: WordEntry[];
+}
+
+interface LibraryWordbookSummary {
+  id: string;
+  name: string;
+  group: string;
+  description: string;
+  wordCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface LibraryWordbookDetail extends LibraryWordbookSummary {
   words: WordEntry[];
 }
 
@@ -194,9 +213,12 @@ let authHasUsers = true;
 let authMode: AuthMode = "login";
 let adminUsers: AdminUserSummary[] = [];
 let adminWordbooks: AdminWordbookSummary[] = [];
+let adminLibraryWordbooks: LibraryWordbookSummary[] = [];
 let adminLogs: AuditLogEntry[] = [];
 let selectedAdminWordbook: AdminWordbookDetail | null = null;
+let selectedAdminLibraryWordbook: LibraryWordbookDetail | null = null;
 let isAdminWordbookLoading = false;
+let isAdminLibraryWordbookLoading = false;
 let isAdminLoading = false;
 let wordbookSearch = "";
 let answerSearch = "";
@@ -283,9 +305,12 @@ async function refreshAll(): Promise<void> {
   } else {
     adminUsers = [];
     adminWordbooks = [];
+    adminLibraryWordbooks = [];
     adminLogs = [];
     selectedAdminWordbook = null;
+    selectedAdminLibraryWordbook = null;
     isAdminWordbookLoading = false;
+    isAdminLibraryWordbookLoading = false;
   }
 
   syncAddDraftGroups();
@@ -426,7 +451,7 @@ function renderAppBar(): string {
       </div>
       <div class="app-actions">
         ${page === "home" ? "" : `<button class="ghost-button compact-home-button" data-home-button type="button">홈</button>`}
-        <button class="ghost-button compact-settings-button" data-tab="settings" type="button">설정</button>
+        <button class="ghost-button compact-settings-button settings-icon-button" data-tab="settings" type="button" aria-label="설정" title="설정">&#9881;</button>
         <button class="ghost-button compact-logout-button" id="app-logout-button" type="button">로그아웃</button>
       </div>
     </header>
@@ -926,24 +951,49 @@ function renderAdminDashboard(): string {
       <div class="page-header admin-header">
         <div>
           <p class="eyebrow">관리자</p>
-          <h2>사용자 · 서버로그 · 전체 단어장</h2>
+          <h2>사용자와 단어장 배포를 관리하세요</h2>
         </div>
       </div>
       ${isAdminLoading ? `<div class="panel empty-note">관리자 데이터를 불러오는 중입니다.</div>` : `
-        <div class="admin-grid">
-          <article class="panel admin-panel">
-            <h3>사용자</h3>
-            ${adminUsers.length ? adminUsers.map(renderAdminUser).join("") : `<div class="empty-note">사용자가 없습니다.</div>`}
+        <div class="admin-metrics">
+          <div><span class="metric-value">${adminUsers.length}</span><span class="metric-label">사용자</span></div>
+          <div><span class="metric-value">${adminLibraryWordbooks.length}</span><span class="metric-label">보관소 단어장</span></div>
+          <div><span class="metric-value">${adminWordbooks.length}</span><span class="metric-label">사용자 단어장</span></div>
+        </div>
+
+        <div class="admin-console-grid">
+          <article class="panel admin-panel admin-users-panel">
+            <div class="panel-title-row">
+              <h3>사용자 관리</h3>
+              <span class="admin-detail-meta">계정 정보 · 권한 · 삭제</span>
+            </div>
+            <div class="admin-user-list">
+              ${adminUsers.length ? adminUsers.map(renderAdminUser).join("") : `<div class="empty-note">사용자가 없습니다.</div>`}
+            </div>
           </article>
+
+          <section class="admin-library-stack">
+            ${renderAdminLibraryCreateForm()}
+            <article class="panel admin-panel">
+              <div class="panel-title-row">
+                <h3>단어장 보관소</h3>
+                <span class="admin-detail-meta">사용자에게 복사 배포</span>
+              </div>
+              ${adminLibraryWordbooks.length ? adminLibraryWordbooks.map(renderAdminLibraryWordbook).join("") : `<div class="empty-note">보관소 단어장이 없습니다.</div>`}
+            </article>
+          </section>
+
           <article class="panel admin-panel">
             <h3>사용자 단어장</h3>
             ${adminWordbooks.length ? adminWordbooks.map(renderAdminWordbook).join("") : `<div class="empty-note">단어장이 없습니다.</div>`}
           </article>
+
           <article class="panel admin-panel admin-log-panel">
             <h3>서버로그</h3>
             ${adminLogs.length ? adminLogs.map(renderAuditLog).join("") : `<div class="empty-note">로그가 없습니다.</div>`}
           </article>
         </div>
+        ${renderAdminLibraryWordbookDetail()}
         ${renderAdminWordbookDetail()}
       `}
     </section>
@@ -969,13 +1019,98 @@ function renderAdminPage(): string {
 }
 
 function renderAdminUser(user: AdminUserSummary): string {
+  const isCurrent = user.id === currentUser?.id;
   return `
-    <article class="admin-row">
-      <div>
-        <strong>${escapeHtml(user.name)}</strong>
-        <span>${escapeHtml(user.loginId)} · ${escapeHtml(user.email)}</span>
+    <form class="admin-user-card" data-admin-user-form="${user.id}">
+      <div class="admin-user-heading">
+        <div>
+          <strong>${escapeHtml(user.name)}</strong>
+          <span>${escapeHtml(user.loginId)} · ${escapeHtml(user.email)}</span>
+        </div>
+        <small>${isCurrent ? "현재 계정" : user.role === "admin" ? "관리자" : "사용자"}</small>
       </div>
-      <small>${user.role === "admin" ? "관리자" : "사용자"}</small>
+      <div class="admin-user-fields">
+        <label class="field">
+          <span>아이디</span>
+          <input name="loginId" type="text" maxlength="32" value="${escapeAttribute(user.loginId)}" required />
+        </label>
+        <label class="field">
+          <span>이메일</span>
+          <input name="email" type="email" maxlength="254" value="${escapeAttribute(user.email)}" required />
+        </label>
+        <label class="field">
+          <span>이름</span>
+          <input name="name" type="text" maxlength="60" value="${escapeAttribute(user.name)}" required />
+        </label>
+        <label class="field">
+          <span>권한</span>
+          <select name="role" ${isCurrent ? "disabled" : ""}>
+            <option value="user" ${user.role === "user" ? "selected" : ""}>사용자</option>
+            <option value="admin" ${user.role === "admin" ? "selected" : ""}>관리자</option>
+          </select>
+        </label>
+      </div>
+      <div class="admin-user-footer">
+        <div class="admin-stat-pills">
+          <span>단어장 ${user.wordbookCount}</span>
+          <span>단어 ${user.wordCount}</span>
+          <span>그룹 ${user.groupCount}</span>
+          <span>기록 ${user.resultCount}</span>
+        </div>
+        <div class="admin-user-actions">
+          <button class="ghost-button mini-button" type="submit" ${isBusy ? "disabled" : ""}>저장</button>
+          <button class="danger-button mini-button" data-admin-delete-user-id="${user.id}" type="button" ${isCurrent || isBusy ? "disabled" : ""}>계정 삭제</button>
+        </div>
+      </div>
+    </form>
+  `;
+}
+
+function renderAdminLibraryCreateForm(): string {
+  return `
+    <form class="panel admin-library-form" id="admin-library-form">
+      <div class="panel-title-row">
+        <h3>보관소에 단어장 추가</h3>
+        <span class="admin-detail-meta">관리자 전용 DB</span>
+      </div>
+      <div class="admin-library-fields">
+        <label class="field">
+          <span>이름</span>
+          <input name="name" type="text" maxlength="80" required />
+        </label>
+        <label class="field">
+          <span>그룹</span>
+          <input name="group" type="text" maxlength="60" value="${escapeAttribute(DEFAULT_GROUP_NAME)}" />
+        </label>
+      </div>
+      <label class="field">
+        <span>메모</span>
+        <input name="description" type="text" maxlength="500" />
+      </label>
+      <label class="field textarea-field compact-textarea">
+        <span>단어</span>
+        <textarea name="words" rows="7" spellcheck="false" placeholder="apple = 사과&#10;valid, 타당한&#10;take place&#9;일어나다"></textarea>
+      </label>
+      <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>보관소에 저장</button>
+    </form>
+  `;
+}
+
+function renderAdminLibraryWordbook(book: LibraryWordbookSummary): string {
+  return `
+    <article class="admin-row admin-library-row">
+      <div>
+        <strong>${escapeHtml(book.name)}</strong>
+        <span>${escapeHtml(book.group || DEFAULT_GROUP_NAME)} · ${book.wordCount}개 · 수정 ${formatDate(book.updatedAt)}</span>
+      </div>
+      <form class="admin-assign-form" data-admin-library-assign="${book.id}">
+        <select name="targetUserId" aria-label="대상 사용자">
+          ${adminUsers.map((user) => `<option value="${user.id}">${escapeHtml(user.loginId)} / ${escapeHtml(user.name)}</option>`).join("")}
+        </select>
+        <button class="primary-button mini-button" type="submit" ${adminUsers.length && !isBusy ? "" : "disabled"}>넣기</button>
+        <button class="ghost-button mini-button" data-admin-library-wordbook-id="${book.id}" type="button">내용</button>
+        <button class="danger-button mini-button" data-admin-library-delete-id="${book.id}" type="button" ${isBusy ? "disabled" : ""}>삭제</button>
+      </form>
     </article>
   `;
 }
@@ -991,6 +1126,30 @@ function renderAdminWordbook(book: AdminWordbookSummary): string {
         <span>${escapeHtml(owner)} · ${escapeHtml(book.group || DEFAULT_GROUP_NAME)} · ${book.wordCount}개</span>
       </div>
       <button class="ghost-button mini-button" data-admin-wordbook-id="${book.id}" type="button">내용</button>
+    </article>
+  `;
+}
+
+function renderAdminLibraryWordbookDetail(): string {
+  if (isAdminLibraryWordbookLoading) {
+    return `<article class="panel admin-wordbook-detail"><div class="empty-note">보관소 단어장을 불러오는 중입니다.</div></article>`;
+  }
+
+  if (!selectedAdminLibraryWordbook) {
+    return "";
+  }
+
+  return `
+    <article class="panel admin-wordbook-detail">
+      <div class="answer-toolbar">
+        <div>
+          <p class="eyebrow">관리자 보관소</p>
+          <h3>${escapeHtml(selectedAdminLibraryWordbook.name)}</h3>
+        </div>
+        <span class="admin-detail-meta">${escapeHtml(selectedAdminLibraryWordbook.group || DEFAULT_GROUP_NAME)} · ${selectedAdminLibraryWordbook.wordCount}개</span>
+      </div>
+      ${selectedAdminLibraryWordbook.description ? `<p class="muted">${escapeHtml(selectedAdminLibraryWordbook.description)}</p>` : ""}
+      ${renderWordEntryTable(selectedAdminLibraryWordbook.words)}
     </article>
   `;
 }
@@ -1018,27 +1177,33 @@ function renderAdminWordbookDetail(): string {
         <span class="admin-detail-meta">${escapeHtml(selectedAdminWordbook.group || DEFAULT_GROUP_NAME)} · ${selectedAdminWordbook.wordCount}개</span>
       </div>
       ${selectedAdminWordbook.description ? `<p class="muted">${escapeHtml(selectedAdminWordbook.description)}</p>` : ""}
-      <div class="answer-table-wrap">
-        <table class="answer-table">
-          <thead>
-            <tr>
-              <th>번호</th>
-              <th>영어</th>
-              <th>한글</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${selectedAdminWordbook.words.map((word, index) => `
-              <tr>
-                <td>${index + 1}</td>
-                <td>${escapeHtml(word.english)}</td>
-                <td>${escapeHtml(word.korean)}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
+      ${renderWordEntryTable(selectedAdminWordbook.words)}
     </article>
+  `;
+}
+
+function renderWordEntryTable(words: WordEntry[]): string {
+  return `
+    <div class="answer-table-wrap">
+      <table class="answer-table">
+        <thead>
+          <tr>
+            <th>번호</th>
+            <th>영어</th>
+            <th>한글</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${words.map((word, index) => `
+            <tr>
+              <td>${index + 1}</td>
+              <td>${escapeHtml(word.english)}</td>
+              <td>${escapeHtml(word.korean)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -1688,6 +1853,43 @@ function bindEvents(): void {
       void loadAdminWordbookDetail(button.dataset.adminWordbookId ?? "");
     });
   });
+
+  document.querySelectorAll<HTMLFormElement>("[data-admin-user-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void updateAdminUserFromForm(form.dataset.adminUserForm ?? "", new FormData(form));
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-admin-delete-user-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void deleteAdminUserById(button.dataset.adminDeleteUserId ?? "");
+    });
+  });
+
+  document.querySelector<HTMLFormElement>("#admin-library-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void createAdminLibraryWordbook(new FormData(event.currentTarget as HTMLFormElement));
+  });
+
+  document.querySelectorAll<HTMLFormElement>("[data-admin-library-assign]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void assignAdminLibraryWordbook(form.dataset.adminLibraryAssign ?? "", new FormData(form));
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-admin-library-wordbook-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void loadAdminLibraryWordbookDetail(button.dataset.adminLibraryWordbookId ?? "");
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-admin-library-delete-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void deleteAdminLibraryWordbook(button.dataset.adminLibraryDeleteId ?? "");
+    });
+  });
 }
 
 function bindAuthEvents(): void {
@@ -1805,16 +2007,21 @@ async function refreshAdminData(): Promise<void> {
 
   isAdminLoading = true;
   try {
-    const [users, wordbookList, logs] = await Promise.all([
+    const [users, wordbookList, libraryWordbooks, logs] = await Promise.all([
       api<AdminUserSummary[]>("/api/admin/users"),
       api<AdminWordbookSummary[]>("/api/admin/wordbooks"),
+      api<LibraryWordbookSummary[]>("/api/admin/library-wordbooks"),
       api<AuditLogEntry[]>("/api/admin/logs")
     ]);
     adminUsers = users;
     adminWordbooks = wordbookList;
+    adminLibraryWordbooks = libraryWordbooks;
     adminLogs = logs;
     if (selectedAdminWordbook && !adminWordbooks.some((book) => book.id === selectedAdminWordbook?.id)) {
       selectedAdminWordbook = null;
+    }
+    if (selectedAdminLibraryWordbook && !adminLibraryWordbooks.some((book) => book.id === selectedAdminLibraryWordbook?.id)) {
+      selectedAdminLibraryWordbook = null;
     }
   } finally {
     isAdminLoading = false;
@@ -1839,6 +2046,142 @@ async function loadAdminWordbookDetail(id: string): Promise<void> {
   }
 }
 
+async function loadAdminLibraryWordbookDetail(id: string): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  isAdminLibraryWordbookLoading = true;
+  render();
+  try {
+    selectedAdminLibraryWordbook = await api<LibraryWordbookDetail>(`/api/admin/library-wordbooks/${id}`);
+  } catch (error) {
+    selectedAdminLibraryWordbook = null;
+    showToast(error instanceof Error ? error.message : "보관소 단어장을 불러오지 못했습니다.");
+  } finally {
+    isAdminLibraryWordbookLoading = false;
+    render();
+  }
+}
+
+async function updateAdminUserFromForm(id: string, formData: FormData): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  await withBusy(async () => {
+    const updated = await api<CurrentUser>(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        loginId: String(formData.get("loginId") ?? ""),
+        email: String(formData.get("email") ?? ""),
+        name: String(formData.get("name") ?? ""),
+        role: String(formData.get("role") ?? "")
+      })
+    });
+    if (currentUser?.id === updated.id) {
+      currentUser = { ...currentUser, ...updated };
+    }
+    showToast("사용자 정보를 저장했습니다.");
+    await refreshAll();
+  });
+}
+
+async function deleteAdminUserById(id: string): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  const user = adminUsers.find((entry) => entry.id === id);
+  if (!user) {
+    return;
+  }
+
+  const confirmed = window.confirm(`${user.loginId} 계정을 삭제할까요?\n\n해당 사용자의 단어장, 그룹, 학습 기록, 로그인 세션도 같이 삭제됩니다.`);
+  if (!confirmed) {
+    return;
+  }
+
+  await withBusy(async () => {
+    await api<void>(`/api/admin/users/${id}`, { method: "DELETE" });
+    if (selectedAdminWordbook?.ownerId === id) {
+      selectedAdminWordbook = null;
+    }
+    showToast("사용자 계정을 삭제했습니다.");
+    await refreshAll();
+  });
+}
+
+async function createAdminLibraryWordbook(formData: FormData): Promise<void> {
+  const words = parseManualWords(String(formData.get("words") ?? ""));
+  if (words.length === 0) {
+    showToast("입력된 단어를 확인하세요.");
+    return;
+  }
+
+  await withBusy(async () => {
+    const created = await api<LibraryWordbookSummary>("/api/admin/library-wordbooks/manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: String(formData.get("name") ?? ""),
+        group: String(formData.get("group") ?? ""),
+        description: String(formData.get("description") ?? ""),
+        words
+      })
+    });
+    selectedAdminLibraryWordbook = null;
+    showToast(`${created.name}을 보관소에 저장했습니다.`);
+    await refreshAll();
+  });
+}
+
+async function assignAdminLibraryWordbook(id: string, formData: FormData): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  const targetUserId = String(formData.get("targetUserId") ?? "");
+  const target = adminUsers.find((user) => user.id === targetUserId);
+  if (!target) {
+    showToast("대상 사용자를 선택하세요.");
+    return;
+  }
+
+  const book = adminLibraryWordbooks.find((entry) => entry.id === id);
+  await withBusy(async () => {
+    await api<WordbookSummary>(`/api/admin/library-wordbooks/${id}/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetUserId })
+    });
+    showToast(`${target.loginId}에게 ${book?.name ?? "단어장"}을 넣었습니다.`);
+    await refreshAll();
+  });
+}
+
+async function deleteAdminLibraryWordbook(id: string): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  const book = adminLibraryWordbooks.find((entry) => entry.id === id);
+  const confirmed = window.confirm(`${book?.name ?? "보관소 단어장"}을 보관소에서 삭제할까요?`);
+  if (!confirmed) {
+    return;
+  }
+
+  await withBusy(async () => {
+    await api<void>(`/api/admin/library-wordbooks/${id}`, { method: "DELETE" });
+    if (selectedAdminLibraryWordbook?.id === id) {
+      selectedAdminLibraryWordbook = null;
+    }
+    showToast("보관소 단어장을 삭제했습니다.");
+    await refreshAll();
+  });
+}
+
 function resetAuthenticatedState(): void {
   currentUser = null;
   csrfToken = "";
@@ -1847,9 +2190,12 @@ function resetAuthenticatedState(): void {
   results = [];
   adminUsers = [];
   adminWordbooks = [];
+  adminLibraryWordbooks = [];
   adminLogs = [];
   selectedAdminWordbook = null;
+  selectedAdminLibraryWordbook = null;
   isAdminWordbookLoading = false;
+  isAdminLibraryWordbookLoading = false;
   selectedWordbookId = "";
   selectedResult = null;
   selectedResultId = "";
@@ -2916,9 +3262,10 @@ function setColorMode(nextMode: ColorMode): void {
 
 function loadColorMode(): ColorMode {
   try {
-    return window.localStorage.getItem("voca-color-mode") === "dark" ? "dark" : "light";
+    const stored = window.localStorage.getItem("voca-color-mode");
+    return stored === "light" ? "light" : "dark";
   } catch {
-    return "light";
+    return "dark";
   }
 }
 

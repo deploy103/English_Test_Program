@@ -8,7 +8,8 @@ import type {
   PublicUser,
   SessionRecord,
   SessionSummary,
-  UserRecord
+  UserRecord,
+  UserRole
 } from "./types.js";
 
 const SESSION_COOKIE = "wt_session";
@@ -59,6 +60,13 @@ export interface LoginInput {
   identifier: string;
   password: string;
   rememberMe?: boolean;
+}
+
+export interface AdminUpdateUserInput {
+  loginId?: string;
+  email?: string;
+  name?: string;
+  role?: UserRole;
 }
 
 export interface RegistrationResult {
@@ -388,6 +396,100 @@ export async function getUserMapByIds(ids: Iterable<string>): Promise<Map<string
     .map((user) => [user.id, publicUser(user)]));
 }
 
+export async function updateUserForAdmin(
+  actor: UserRecord,
+  targetUserId: string,
+  input: AdminUpdateUserInput,
+  meta: AuthRequestMeta
+): Promise<PublicUser> {
+  return withUserWriteLock(async () => {
+    assertSafeId(targetUserId);
+    const users = await readRecords<UserRecord>(USER_DIR);
+    const target = users.find((user) => user.id === targetUserId);
+    if (!target) {
+      throw new HttpError(404, "사용자를 찾을 수 없습니다.");
+    }
+
+    const nextLoginId = typeof input.loginId === "string" ? normalizeLoginId(input.loginId) : target.loginId;
+    const nextEmail = typeof input.email === "string" ? normalizeEmail(input.email) : target.email;
+    const nextName = typeof input.name === "string" ? normalizeName(input.name) : target.name;
+    const nextRole = input.role === "admin" || input.role === "user" ? input.role : target.role;
+
+    if (target.id === actor.id && nextRole !== "admin") {
+      badRequest("본인 관리자 권한은 직접 해제할 수 없습니다.");
+    }
+    if (target.role === "admin" && nextRole !== "admin" && countAdmins(users) <= 1) {
+      badRequest("마지막 관리자 권한은 해제할 수 없습니다.");
+    }
+
+    const duplicate = users.some((user) => (
+      user.id !== target.id &&
+      (user.loginId === nextLoginId || user.email === nextEmail)
+    ));
+    if (duplicate) {
+      badRequest("이미 사용 중인 이메일 또는 아이디입니다.");
+    }
+
+    target.loginId = nextLoginId;
+    target.email = nextEmail;
+    target.name = nextName;
+    target.role = nextRole;
+    target.updatedAt = new Date().toISOString();
+    await writeJson(userPath(target.id), target);
+    await appendAuditLog({
+      event: "admin.user_update",
+      result: "success",
+      actorUserId: actor.id,
+      actorLoginId: actor.loginId,
+      targetUserId: target.id,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      message: `user=${target.loginId}`
+    });
+    return publicUser(target);
+  });
+}
+
+export async function deleteUserForAdmin(
+  actor: UserRecord,
+  targetUserId: string,
+  meta: AuthRequestMeta
+): Promise<PublicUser> {
+  return withUserWriteLock(async () => {
+    assertSafeId(targetUserId);
+    const users = await readRecords<UserRecord>(USER_DIR);
+    const target = users.find((user) => user.id === targetUserId);
+    if (!target) {
+      throw new HttpError(404, "사용자를 찾을 수 없습니다.");
+    }
+    if (target.id === actor.id) {
+      badRequest("본인 계정은 관리자 화면에서 삭제할 수 없습니다.");
+    }
+    if (target.role === "admin" && countAdmins(users) <= 1) {
+      badRequest("마지막 관리자 계정은 삭제할 수 없습니다.");
+    }
+
+    const sessions = await readRecords<SessionRecord>(SESSION_DIR);
+    await Promise.all([
+      fs.rm(userPath(target.id), { force: true }),
+      ...sessions
+        .filter((session) => session.userId === target.id)
+        .map((session) => fs.rm(sessionPath(session.id), { force: true }))
+    ]);
+    await appendAuditLog({
+      event: "admin.user_delete",
+      result: "success",
+      actorUserId: actor.id,
+      actorLoginId: actor.loginId,
+      targetUserId: target.id,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      message: `user=${target.loginId}`
+    });
+    return publicUser(target);
+  });
+}
+
 export async function listAuditLogs(): Promise<AuditLogEntry[]> {
   const text = await fs.readFile(AUDIT_LOG_PATH, "utf-8").catch(() => "");
   return text
@@ -532,6 +634,10 @@ function deriveScrypt(password: string, salt: string, params: PasswordParams): P
 function findUserByIdentifier(users: UserRecord[], identifier: string): UserRecord | undefined {
   const normalized = identifier.trim().toLowerCase();
   return users.find((user) => user.loginId === normalized || user.email === normalized);
+}
+
+function countAdmins(users: UserRecord[]): number {
+  return users.filter((user) => user.role === "admin").length;
 }
 
 async function pruneExpiredSessions(): Promise<void> {
