@@ -31,6 +31,7 @@ import {
   adoptLegacyDataForOwner,
   HttpError,
   MAX_JSON_UPLOAD_BYTES,
+  MAX_JSON_UPLOAD_MEGABYTES,
   UPLOAD_DIR,
   assignLibraryWordbookToUser,
   contentTypeFor,
@@ -73,9 +74,11 @@ const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_RATE_LIMIT_MAX = 60;
 const UPLOAD_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const UPLOAD_RATE_LIMIT_MAX = 20;
-const MAX_UPLOAD_FIELD_BYTES = 2048;
+const MAX_UPLOAD_FIELD_BYTES = 16 * 1024;
 const MAX_UPLOAD_FIELD_NAME_BYTES = 64;
-const MAX_UPLOAD_HEADER_PAIRS = 50;
+const MAX_UPLOAD_HEADER_PAIRS = 100;
+const MAX_UPLOAD_FORM_FIELDS = 8;
+const MAX_UPLOAD_FORM_PARTS = 12;
 const STATS_DEFAULT_DAYS = 7;
 const STATS_MAX_DAYS = 366;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -94,10 +97,10 @@ const upload = multer({
   limits: {
     fieldNameSize: MAX_UPLOAD_FIELD_NAME_BYTES,
     fieldSize: MAX_UPLOAD_FIELD_BYTES,
-    fields: 3,
+    fields: MAX_UPLOAD_FORM_FIELDS,
     fileSize: MAX_JSON_UPLOAD_BYTES,
     files: 1,
-    parts: 4,
+    parts: MAX_UPLOAD_FORM_PARTS,
     headerPairs: MAX_UPLOAD_HEADER_PAIRS
   },
   fileFilter: (_request, file, callback) => {
@@ -124,7 +127,7 @@ app.use(securityHeaders);
 app.use(rejectCrossSiteWrites);
 app.use(rejectCrossOriginWrites);
 app.use("/api", rejectUnsupportedApiContentType);
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: `${MAX_JSON_UPLOAD_MEGABYTES}mb` }));
 app.use("/api", (_request, response, next) => {
   response.setHeader("Cache-Control", "no-store");
   next();
@@ -958,13 +961,16 @@ function parserErrorStatus(error: unknown): number | null {
 
 function uploadLimitMessage(error: multer.MulterError): string {
   if (error.code === "LIMIT_FILE_SIZE") {
-    return "JSON 파일은 2MB 이하만 업로드할 수 있습니다.";
+    return `JSON 파일은 ${MAX_JSON_UPLOAD_MEGABYTES}MB 이하만 업로드할 수 있습니다.`;
   }
   if (error.code === "LIMIT_FILE_COUNT" || error.code === "LIMIT_UNEXPECTED_FILE") {
     return "JSON 파일은 하나만 업로드할 수 있습니다.";
   }
-  if (error.code === "LIMIT_PART_COUNT" || error.code === "LIMIT_FIELD_COUNT" || error.code === "LIMIT_FIELD_KEY" || error.code === "LIMIT_FIELD_VALUE") {
-    return "업로드 입력값이 허용 범위를 초과했습니다.";
+  if (error.code === "LIMIT_PART_COUNT" || error.code === "LIMIT_FIELD_COUNT") {
+    return "업로드 폼 입력값이 너무 많습니다.";
+  }
+  if (error.code === "LIMIT_FIELD_KEY" || error.code === "LIMIT_FIELD_VALUE") {
+    return "업로드 입력값이 너무 깁니다.";
   }
   return "파일 업로드에 실패했습니다.";
 }
