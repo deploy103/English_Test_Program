@@ -203,6 +203,7 @@ let answerSearch = "";
 let editingWordbookId = "";
 let authSessions: AuthSessionSummary[] = [];
 let colorMode: ColorMode = loadColorMode();
+let lastRenderedPath = window.location.pathname;
 
 applyColorMode();
 
@@ -298,9 +299,15 @@ async function refreshAll(): Promise<void> {
 }
 
 function render(): void {
+  const renderPath = window.location.pathname;
+  const shouldPreserveScroll = currentUser && renderPath === lastRenderedPath && !activeTest && !activeMemorize;
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+
   if (!currentUser) {
     app.innerHTML = renderAuthPage();
     bindEvents();
+    lastRenderedPath = renderPath;
     return;
   }
 
@@ -319,6 +326,10 @@ function render(): void {
   `;
 
   bindEvents();
+  if (shouldPreserveScroll) {
+    window.scrollTo(scrollX, scrollY);
+  }
+  lastRenderedPath = renderPath;
 }
 
 function renderMainContent(): string {

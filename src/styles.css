@@ -10,18 +10,6 @@
   -webkit-font-smoothing: antialiased;
 }
 
-@keyframes page-rise {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @keyframes menu-item-in {
   from {
     opacity: 0;
@@ -625,7 +613,6 @@ a {
   min-width: 0;
   margin: 0 auto;
   padding: 110px 22px 34px;
-  animation: page-rise 320ms ease both;
 }
 
 .test-main {
@@ -790,7 +777,6 @@ a {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 22px;
-  animation: page-rise 260ms ease both;
 }
 
 .header-actions,
@@ -872,7 +858,6 @@ a {
   background:
     linear-gradient(180deg, #ffffff, #fbfdff);
   box-shadow: 0 10px 24px rgba(17, 24, 39, 0.05);
-  animation: page-rise 300ms ease both;
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
