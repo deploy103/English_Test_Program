@@ -128,7 +128,7 @@ export async function registerUser(input: RegisterUserInput, meta: AuthRequestMe
       targetUserId: user.id,
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
-      message: isFirstUser ? "first user granted admin role" : "user registered"
+      message: isFirstUser ? "initial account registered" : "user registered"
     });
 
     return { user, session, isFirstUser };

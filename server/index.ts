@@ -414,7 +414,7 @@ function rejectCrossOriginWrites(request: Request, response: Response, next: Nex
   }
 
   const origin = request.headers.origin;
-  if (typeof origin === "string" && origin !== requestOrigin(request)) {
+  if (typeof origin === "string" && !isAllowedWriteOrigin(origin, request)) {
     void appendAuditLog({
       event: "security.origin_reject",
       result: "failure",
@@ -524,8 +524,21 @@ function auditFrom(
   };
 }
 
-function requestOrigin(request: Request): string {
-  return `${request.protocol}://${request.get("host") ?? ""}`;
+function isAllowedWriteOrigin(origin: string, request: Request): boolean {
+  const host = request.get("host");
+  if (!host) {
+    return false;
+  }
+
+  try {
+    const originUrl = new URL(origin);
+    return (
+      originUrl.host === host &&
+      (originUrl.protocol === "http:" || originUrl.protocol === "https:")
+    );
+  } catch {
+    return false;
+  }
 }
 
 function parserErrorStatus(error: unknown): number | null {
