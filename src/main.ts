@@ -314,7 +314,7 @@ function renderAuthPage(): string {
           <div class="brand-mark">WT</div>
           <div>
             <h1>Word Test</h1>
-            <p>${authHasUsers ? "로그인 후 내 단어장을 관리하세요." : "첫 가입 계정은 자동으로 관리자 권한을 받습니다."}</p>
+            <p>로그인 후 내 단어장을 관리하세요.</p>
           </div>
         </div>
 
