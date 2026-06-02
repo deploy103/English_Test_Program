@@ -463,6 +463,8 @@ app.post("/api/tests/start", asyncRoute(async (request, response) => {
     questionCount?: number;
     mode?: TestMode;
     displaySeconds?: number;
+    writingSeconds?: number;
+    answerInputEnabled?: boolean;
   };
 
   const result = await startTest({
@@ -470,7 +472,9 @@ app.post("/api/tests/start", asyncRoute(async (request, response) => {
     wordbookId: body.wordbookId ?? "",
     questionCount: Number(body.questionCount),
     mode: body.mode ?? "rand",
-    displaySeconds: Number(body.displaySeconds)
+    displaySeconds: Number(body.displaySeconds),
+    writingSeconds: Number(body.writingSeconds),
+    answerInputEnabled: body.answerInputEnabled === true
   });
   await appendAuditLog(auditFrom(request, "test.start", "success", result.wordbookName, result.wordbookId));
   response.status(201).json(result);
@@ -490,7 +494,14 @@ app.get("/api/results/:id", asyncRoute(async (request, response) => {
 }));
 
 app.patch("/api/results/:id/complete", asyncRoute(async (request, response) => {
-  const result = await markResultComplete(request.params.id, authOf(request).user.id);
+  const body = request.body as { answers?: { index?: number; userAnswer?: string }[] };
+  const submissions = Array.isArray(body.answers)
+    ? body.answers.map((entry) => ({
+      index: Number(entry.index),
+      userAnswer: String(entry.userAnswer ?? "")
+    }))
+    : [];
+  const result = await markResultComplete(request.params.id, authOf(request).user.id, submissions);
   await appendAuditLog(auditFrom(request, "test.complete", "success", result.wordbookName, result.wordbookId));
   response.json(result);
 }));

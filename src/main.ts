@@ -49,6 +49,8 @@ interface AnswerEntry {
   answer: string;
   promptLanguage: "english" | "korean";
   answerLanguage: "english" | "korean";
+  userAnswer?: string;
+  isCorrect?: boolean;
 }
 
 interface TestResult {
@@ -58,6 +60,10 @@ interface TestResult {
   questionCount: number;
   mode: TestMode;
   displaySeconds: number;
+  writingSeconds: number;
+  answerInputEnabled: boolean;
+  correctCount?: number;
+  scoredQuestionCount?: number;
   answers: AnswerEntry[];
   createdAt: string;
   completedAt?: string;
@@ -71,6 +77,10 @@ interface ResultSummary {
   questionCount: number;
   mode: TestMode;
   displaySeconds: number;
+  writingSeconds: number;
+  answerInputEnabled: boolean;
+  correctCount?: number;
+  scoredQuestionCount?: number;
   createdAt: string;
   completedAt?: string;
 }
@@ -90,6 +100,9 @@ interface ModeStats {
 interface OverallLearningStats {
   testCount: number;
   questionCount: number;
+  correctCount: number;
+  scoredQuestionCount: number;
+  accuracyPercent: number;
   wordbookCount: number;
   averageQuestionsPerTest: number;
   averageDisplaySeconds: number;
@@ -103,6 +116,9 @@ interface WordbookLearningStats {
   wordbookName: string;
   testCount: number;
   questionCount: number;
+  correctCount: number;
+  scoredQuestionCount: number;
+  accuracyPercent: number;
   averageQuestionsPerTest: number;
   averageDisplaySeconds: number;
   modeCounts: ModeStats;
@@ -206,7 +222,7 @@ type AuthMode = "login" | "register";
 type TabKey = "home" | "test" | "memorize" | "add" | "settings" | "groups" | "manage" | "answers" | "stats" | "admin";
 type PlayPageKey = "testPlay" | "memorizePlay";
 type PageKey = TabKey | PlayPageKey | "answerDetail";
-type ActivePhase = "countdown" | "prompt" | "writing" | "done";
+type ActivePhase = "countdown" | "prompt" | "writing" | "feedback" | "done";
 type MemorizeDisplayMode = "en" | "ko" | "both";
 type MemorizePhase = "prompt" | "answer" | "done";
 type ColorMode = "light" | "dark";
@@ -217,6 +233,19 @@ interface ActiveTest {
   countdown: number;
   currentIndex: number;
   remainingMs: number;
+  responses: AnswerResponse[];
+  feedback: AnswerFeedback | null;
+}
+
+interface AnswerResponse {
+  index: number;
+  userAnswer: string;
+}
+
+interface AnswerFeedback {
+  index: number;
+  userAnswer: string;
+  isCorrect: boolean;
 }
 
 interface ActiveMemorize {
@@ -291,7 +320,10 @@ const MEMORIZE_DEFAULT_DISPLAY_SECONDS = 3;
 const MEMORIZE_ANSWER_SECONDS = 3;
 const MEMORIZE_ANSWER_MS = MEMORIZE_ANSWER_SECONDS * 1000;
 const TEST_WRITING_SECONDS = 3;
-const TEST_WRITING_MS = TEST_WRITING_SECONDS * 1000;
+const TEST_MIN_WRITING_SECONDS = 3;
+const TEST_MAX_WRITING_SECONDS = 30;
+const TEST_DEFAULT_INPUT_WRITING_SECONDS = 10;
+const TEST_FEEDBACK_MS = 850;
 const TAB_ROUTES: Record<TabKey, string> = {
   home: "/home",
   test: "/test",
@@ -841,6 +873,18 @@ function renderTestTab(): string {
           <span>표시 시간</span>
           <select name="displaySeconds">
             ${range(3, 15).map((seconds) => `<option value="${seconds}" ${seconds === 5 ? "selected" : ""}>${seconds}초</option>`).join("")}
+          </select>
+        </label>
+
+        <label class="checkbox-field test-input-toggle">
+          <input name="answerInputEnabled" type="checkbox" value="1" />
+          <span>정답 입력</span>
+        </label>
+
+        <label class="field">
+          <span>정답 입력 시간</span>
+          <select name="writingSeconds">
+            ${[3, 5, 10, 15, 20, 30].map((seconds) => `<option value="${seconds}" ${seconds === TEST_DEFAULT_INPUT_WRITING_SECONDS ? "selected" : ""}>${seconds}초</option>`).join("")}
           </select>
         </label>
 
@@ -1586,6 +1630,10 @@ function renderStatsTab(): string {
               <span class="metric-value">${formatStatNumber(currentStats.overall.averageQuestionsPerTest)}</span>
               <span class="metric-label">평균 문항</span>
             </div>
+            <div>
+              <span class="metric-value">${accuracyLabel(currentStats.overall)}</span>
+              <span class="metric-label">정답률</span>
+            </div>
           </div>
           <div class="stats-mode-row">
             ${renderModeStat("랜덤", currentStats.overall.modeCounts.rand)}
@@ -1617,6 +1665,7 @@ function renderStatsTab(): string {
                     <th>단어장</th>
                     <th>테스트</th>
                     <th>문항</th>
+                    <th>정답률</th>
                     <th>평균</th>
                     <th>출제 방식</th>
                     <th>최근</th>
@@ -1662,6 +1711,7 @@ function renderWordbookStatRow(entry: WordbookLearningStats): string {
       <td>${escapeHtml(entry.wordbookName)}</td>
       <td>${formatCount(entry.testCount)}</td>
       <td>${formatCount(entry.questionCount)}</td>
+      <td>${accuracyLabel(entry)}</td>
       <td>${formatStatNumber(entry.averageQuestionsPerTest)}</td>
       <td>${modeStatsLabel(entry.modeCounts)}</td>
       <td>${entry.lastCompletedAt ? formatDate(entry.lastCompletedAt) : "-"}</td>
@@ -1699,10 +1749,11 @@ function renderAnswerDetailPage(): string {
 
 function renderResultItem(result: ResultSummary): string {
   const active = currentAnswerSelectionId() === result.id ? "is-active" : "";
+  const score = result.answerInputEnabled ? ` · ${scoreSummaryLabel(result)}` : "";
   return `
     <a class="list-item ${active}" href="${answerDetailPath(result.id)}" data-route data-result-id="${result.id}">
       <span class="item-title">${escapeHtml(result.wordbookName)}</span>
-      <span class="item-meta">${result.questionCount}개 · ${modeLabel(result.mode)} · ${formatDate(result.createdAt)}</span>
+      <span class="item-meta">${result.questionCount}개 · ${modeLabel(result.mode)}${score} · ${formatDate(result.createdAt)}</span>
     </a>
   `;
 }
@@ -1724,6 +1775,7 @@ function renderResultDetail(result: TestResult): string {
       <span>${result.questionCount}문제</span>
       <span>${modeLabel(result.mode)} 출제</span>
       <span>${result.displaySeconds}초 표시</span>
+      ${result.answerInputEnabled ? `<span>${result.writingSeconds}초 입력</span><span>${scoreSummaryLabel(result)}</span>` : ""}
     </div>
     <div class="answer-card-list">
       ${result.answers.map((entry) => `
@@ -1738,6 +1790,16 @@ function renderResultDetail(result: TestResult): string {
               <span>정답</span>
               <strong>${escapeHtml(entry.answer)}</strong>
             </div>
+            ${result.answerInputEnabled ? `
+              <div>
+                <span>내 답</span>
+                <strong>${escapeHtml(entry.userAnswer || "입력 없음")}</strong>
+              </div>
+              <div>
+                <span>결과</span>
+                <strong>${entry.isCorrect ? "정답" : "오답"}</strong>
+              </div>
+            ` : ""}
           </div>
         </article>
       `).join("")}
@@ -1749,6 +1811,7 @@ function renderResultDetail(result: TestResult): string {
             <th>번호</th>
             <th>문제</th>
             <th>정답</th>
+            ${result.answerInputEnabled ? `<th>내 답</th><th>결과</th>` : ""}
           </tr>
         </thead>
         <tbody>
@@ -1757,6 +1820,7 @@ function renderResultDetail(result: TestResult): string {
               <td>${entry.index}</td>
               <td>${escapeHtml(entry.prompt)}</td>
               <td>${escapeHtml(entry.answer)}</td>
+              ${result.answerInputEnabled ? `<td>${escapeHtml(entry.userAnswer || "입력 없음")}</td><td>${entry.isCorrect ? "정답" : "오답"}</td>` : ""}
             </tr>
           `).join("")}
         </tbody>
@@ -1798,28 +1862,78 @@ function renderActiveTest(): string {
   const entry = activeTest.result.answers[activeTest.currentIndex];
   const progress = `${entry.index} / ${activeTest.result.questionCount}`;
   const progressPercent = Math.round((entry.index / activeTest.result.questionCount) * 100);
+  const answerInputEnabled = activeTest.result.answerInputEnabled === true;
   const isWritingPhase = activeTest.phase === "writing";
-  const phaseDurationMs = isWritingPhase ? TEST_WRITING_MS : activeTest.result.displaySeconds * 1000;
+  const isFeedbackPhase = activeTest.phase === "feedback";
+  const writingDurationMs = testWritingDurationMs(activeTest.result);
+  const phaseDurationMs = isFeedbackPhase ? TEST_FEEDBACK_MS : isWritingPhase ? writingDurationMs : activeTest.result.displaySeconds * 1000;
   const timePercent = Math.max(0, Math.min(100, (activeTest.remainingMs / phaseDurationMs) * 100));
   const secondsLeft = Math.ceil(activeTest.remainingMs / 1000);
+  const phaseClass = [
+    answerInputEnabled ? "has-answer-input" : "",
+    isWritingPhase ? "is-writing" : "",
+    isFeedbackPhase ? "is-feedback" : ""
+  ].filter(Boolean).join(" ");
 
   return `
-    <section class="test-stage ${isWritingPhase ? "is-writing" : ""}">
+    <section class="test-stage ${phaseClass}">
       <div class="stage-top">
         <span>${progress}</span>
-        <span data-time-left>${secondsLeft}s</span>
+        <span data-time-left>${isFeedbackPhase ? "" : `${secondsLeft}s`}</span>
       </div>
       <div class="progress" aria-label="진행률">
         <progress value="${progressPercent}" max="100"></progress>
       </div>
       <div class="stage-center">
-        ${isWritingPhase ? `<div class="writing-blank" aria-label="쓰기 시간"></div>` : `<div class="prompt-word">${escapeHtml(entry.prompt)}</div>`}
+        ${renderActiveTestCenter(entry, timePercent)}
       </div>
-      <div class="time-gauge" aria-label="남은 시간">
+      ${answerInputEnabled && isWritingPhase ? "" : `<div class="time-gauge" aria-label="남은 시간">
         <progress data-time-progress value="${timePercent}" max="100"></progress>
-      </div>
+      </div>`}
     </section>
   `;
+}
+
+function renderActiveTestCenter(entry: AnswerEntry, timePercent: number): string {
+  if (!activeTest) {
+    return "";
+  }
+
+  const answerInputEnabled = activeTest.result.answerInputEnabled === true;
+  if (activeTest.phase === "writing" && answerInputEnabled) {
+    const savedAnswer = activeTest.responses.find((response) => response.index === entry.index)?.userAnswer ?? "";
+    return `
+      <form class="answer-entry-panel" id="answer-entry-form" autocomplete="off">
+        <div class="answer-entry-prompt">${escapeHtml(entry.prompt)}</div>
+        <div class="answer-entry-gauge time-gauge" aria-label="남은 시간">
+          <progress data-time-progress value="${timePercent}" max="100"></progress>
+        </div>
+        <label class="answer-entry-field">
+          <span>정답</span>
+          <input id="answer-input" name="answer" type="text" inputmode="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="200" value="${escapeAttribute(savedAnswer)}" />
+        </label>
+        <button class="primary-button answer-submit-button" type="submit">확인</button>
+      </form>
+    `;
+  }
+
+  if (activeTest.phase === "writing") {
+    return `<div class="writing-blank" aria-label="쓰기 시간"></div>`;
+  }
+
+  if (activeTest.phase === "feedback") {
+    const feedback = activeTest.feedback;
+    const answerText = feedback?.userAnswer.trim() || "입력 없음";
+    return `
+      <div class="answer-feedback-panel ${feedback?.isCorrect ? "is-correct" : "is-wrong"}">
+        <div class="answer-feedback-mark">${feedback?.isCorrect ? "정답" : "오답"}</div>
+        <div class="answer-feedback-row"><span>내 답</span><strong>${escapeHtml(answerText)}</strong></div>
+        <div class="answer-feedback-row"><span>정답</span><strong>${escapeHtml(entry.answer)}</strong></div>
+      </div>
+    `;
+  }
+
+  return `<div class="prompt-word">${escapeHtml(entry.prompt)}</div>`;
 }
 
 function renderActiveMemorize(): string {
@@ -1991,6 +2105,15 @@ function bindEvents(): void {
   document.querySelector<HTMLFormElement>("#start-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     void beginTest(new FormData(event.currentTarget as HTMLFormElement));
+  });
+
+  document.querySelector<HTMLFormElement>("#answer-entry-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitActiveAnswer();
+  });
+
+  document.querySelector<HTMLInputElement>("#answer-input")?.addEventListener("input", (event) => {
+    updateActiveAnswerDraft((event.currentTarget as HTMLInputElement).value);
   });
 
   document.querySelector<HTMLFormElement>("#memorize-form")?.addEventListener("submit", (event) => {
@@ -2468,6 +2591,13 @@ async function beginTest(formData: FormData): Promise<void> {
     return;
   }
 
+  const answerInputEnabled = formData.get("answerInputEnabled") === "1";
+  const writingSeconds = Number(formData.get("writingSeconds"));
+  if (answerInputEnabled && (!Number.isInteger(writingSeconds) || writingSeconds < TEST_MIN_WRITING_SECONDS || writingSeconds > TEST_MAX_WRITING_SECONDS)) {
+    showToast(`정답 입력 시간은 ${TEST_MIN_WRITING_SECONDS}초 이상 ${TEST_MAX_WRITING_SECONDS}초 이하만 가능합니다.`);
+    return;
+  }
+
   await withBusy(async () => {
     const result = await api<TestResult>("/api/tests/start", {
       method: "POST",
@@ -2476,7 +2606,9 @@ async function beginTest(formData: FormData): Promise<void> {
         wordbookId: selectedWordbookId,
         questionCount: Number(formData.get("questionCount")),
         mode: String(formData.get("mode") || "rand"),
-        displaySeconds: Number(formData.get("displaySeconds"))
+        displaySeconds: Number(formData.get("displaySeconds")),
+        writingSeconds,
+        answerInputEnabled
       })
     });
     startCountdown(result);
@@ -2807,7 +2939,9 @@ function startCountdown(result: TestResult): void {
     result,
     countdown: 3,
     currentIndex: -1,
-    remainingMs: result.displaySeconds * 1000
+    remainingMs: result.displaySeconds * 1000,
+    responses: [],
+    feedback: null
   };
   navigateToPath(PLAY_ROUTES.testPlay);
   render();
@@ -2839,9 +2973,11 @@ function showQuestion(index: number): void {
   }
 
   clearTimer();
+  blurActiveControl();
   activeTest.phase = "prompt";
   activeTest.currentIndex = index;
   activeTest.remainingMs = activeTest.result.displaySeconds * 1000;
+  activeTest.feedback = null;
   render();
 
   runActiveTestTimer(activeTest.remainingMs, () => {
@@ -2857,10 +2993,62 @@ function showWritingTime(index: number): void {
   clearTimer();
   activeTest.phase = "writing";
   activeTest.currentIndex = index;
-  activeTest.remainingMs = TEST_WRITING_MS;
+  activeTest.remainingMs = testWritingDurationMs(activeTest.result);
+  render();
+  focusAnswerInputIfNeeded();
+
+  runActiveTestTimer(activeTest.remainingMs, () => {
+    completeWritingTime(index);
+  });
+}
+
+function completeWritingTime(index: number): void {
+  if (!activeTest) {
+    return;
+  }
+
+  if (activeTest.result.answerInputEnabled) {
+    captureAnswerInputValue();
+    showAnswerFeedback(index);
+    return;
+  }
+
+  showQuestion(index + 1);
+}
+
+function submitActiveAnswer(): void {
+  if (!activeTest || activeTest.phase !== "writing" || !activeTest.result.answerInputEnabled) {
+    return;
+  }
+
+  captureAnswerInputValue();
+  clearTimer();
+  showAnswerFeedback(activeTest.currentIndex);
+}
+
+function showAnswerFeedback(index: number): void {
+  if (!activeTest) {
+    return;
+  }
+
+  const entry = activeTest.result.answers[index];
+  if (!entry) {
+    showQuestion(index + 1);
+    return;
+  }
+
+  blurActiveControl();
+  const userAnswer = activeTest.responses.find((response) => response.index === entry.index)?.userAnswer ?? "";
+  activeTest.feedback = {
+    index: entry.index,
+    userAnswer,
+    isCorrect: isAnswerCorrectClient(userAnswer, entry.answer)
+  };
+  activeTest.phase = "feedback";
+  activeTest.remainingMs = TEST_FEEDBACK_MS;
   render();
 
-  runActiveTestTimer(TEST_WRITING_MS, () => {
+  runActiveTestTimer(TEST_FEEDBACK_MS, () => {
     showQuestion(index + 1);
   });
 }
@@ -2884,6 +3072,78 @@ function runActiveTestTimer(durationMs: number, onDone: () => void): void {
   }, 100);
 }
 
+function updateActiveAnswerDraft(value: string): void {
+  if (!activeTest || activeTest.phase !== "writing") {
+    return;
+  }
+  const entry = activeTest.result.answers[activeTest.currentIndex];
+  if (!entry) {
+    return;
+  }
+  setActiveAnswerResponse(entry.index, value);
+}
+
+function captureAnswerInputValue(): void {
+  const input = document.querySelector<HTMLInputElement>("#answer-input");
+  if (input) {
+    updateActiveAnswerDraft(input.value);
+  }
+}
+
+function setActiveAnswerResponse(index: number, value: string): void {
+  if (!activeTest) {
+    return;
+  }
+  const normalized = value.slice(0, 200);
+  const existing = activeTest.responses.find((response) => response.index === index);
+  if (existing) {
+    existing.userAnswer = normalized;
+    return;
+  }
+  activeTest.responses.push({ index, userAnswer: normalized });
+}
+
+function focusAnswerInputIfNeeded(): void {
+  if (!activeTest?.result.answerInputEnabled) {
+    return;
+  }
+  window.setTimeout(() => {
+    const input = document.querySelector<HTMLInputElement>("#answer-input");
+    input?.focus({ preventScroll: true });
+  }, 50);
+}
+
+function blurActiveControl(): void {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement) {
+    active.blur();
+  }
+}
+
+function testWritingDurationMs(result: TestResult): number {
+  return (result.answerInputEnabled ? result.writingSeconds : TEST_WRITING_SECONDS) * 1000;
+}
+
+function isAnswerCorrectClient(userAnswer: string, answer: string): boolean {
+  const normalizedUserAnswer = normalizeAnswerForCompare(userAnswer);
+  if (!normalizedUserAnswer) {
+    return false;
+  }
+  return answer
+    .split(/[;,/|]/)
+    .concat(answer)
+    .map((candidate) => normalizeAnswerForCompare(candidate))
+    .some((candidate) => candidate === normalizedUserAnswer);
+}
+
+function normalizeAnswerForCompare(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("ko-KR");
+}
+
 async function finishActiveTest(): Promise<void> {
   if (!activeTest) {
     return;
@@ -2893,8 +3153,17 @@ async function finishActiveTest(): Promise<void> {
   activeTest.phase = "done";
   render();
 
+  const completionBody = activeTest.result.answerInputEnabled
+    ? JSON.stringify({ answers: activeTest.responses })
+    : undefined;
   const completed = await api<TestResult>(`/api/results/${activeTest.result.id}/complete`, {
-    method: "PATCH"
+    method: "PATCH",
+    ...(completionBody
+      ? {
+        headers: { "Content-Type": "application/json" },
+        body: completionBody
+      }
+      : {})
   });
   selectedResult = completed;
   selectedResultId = completed.id;
@@ -3673,6 +3942,21 @@ function formatShortDate(value: string): string {
 
 function modeStatsLabel(value: ModeStats): string {
   return `랜덤 ${formatCount(value.rand)} · 영어 ${formatCount(value.en)} · 한글 ${formatCount(value.ko)}`;
+}
+
+function scoreSummaryLabel(value: { correctCount?: number; scoredQuestionCount?: number }): string {
+  const scored = value.scoredQuestionCount ?? 0;
+  if (!scored) {
+    return "채점 없음";
+  }
+  return `${formatCount(value.correctCount ?? 0)} / ${formatCount(scored)}`;
+}
+
+function accuracyLabel(value: { accuracyPercent?: number; scoredQuestionCount?: number }): string {
+  if (!value.scoredQuestionCount) {
+    return "-";
+  }
+  return `${formatStatNumber(value.accuracyPercent ?? 0)}%`;
 }
 
 function formatDate(value: string): string {

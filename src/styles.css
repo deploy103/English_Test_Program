@@ -2132,7 +2132,7 @@ textarea:focus {
 }
 
 .stats-metrics {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .stats-mode-row {
@@ -2232,7 +2232,7 @@ textarea:focus {
 
 .test-stage {
   display: grid;
-  min-height: calc(100vh - 94px);
+  min-height: calc(100dvh - 94px);
   grid-template-rows: auto 8px minmax(0, 1fr) auto;
   gap: 18px;
   padding: 8px;
@@ -2314,6 +2314,113 @@ textarea:focus {
   line-height: 1.05;
   text-shadow: 0 20px 60px rgba(15, 23, 42, 0.45);
   animation: soft-pop 220ms ease both;
+}
+
+.test-stage.has-answer-input {
+  gap: 14px;
+}
+
+.test-stage.has-answer-input.is-writing {
+  grid-template-rows: auto 8px minmax(0, 1fr);
+}
+
+.answer-entry-panel {
+  display: grid;
+  width: min(720px, 100%);
+  gap: 14px;
+  justify-items: stretch;
+  padding: min(4vh, 28px);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.28);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+}
+
+.answer-entry-prompt {
+  overflow-wrap: anywhere;
+  color: #f8fafc;
+  text-align: center;
+  text-shadow: 0 18px 52px rgba(15, 23, 42, 0.42);
+  font-size: clamp(30px, 8vw, 76px);
+  font-weight: 900;
+  line-height: 1.05;
+}
+
+.answer-entry-gauge {
+  width: 100%;
+}
+
+.answer-entry-field {
+  display: grid;
+  gap: 8px;
+}
+
+.answer-entry-field span {
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.answer-entry-field input {
+  min-height: 54px;
+  border-color: rgba(148, 163, 184, 0.5);
+  border-radius: 18px;
+  background: #ffffff;
+  font-size: 20px;
+  font-weight: 850;
+}
+
+.answer-submit-button {
+  min-height: 48px;
+}
+
+.answer-feedback-panel {
+  display: grid;
+  width: min(680px, 100%);
+  gap: 12px;
+  padding: min(4vh, 30px);
+  border: 1px solid rgba(248, 113, 113, 0.38);
+  border-radius: 24px;
+  background: rgba(127, 29, 29, 0.28);
+  animation: answer-reveal 180ms ease both;
+}
+
+.answer-feedback-panel.is-correct {
+  border-color: rgba(52, 211, 153, 0.44);
+  background: rgba(6, 95, 70, 0.28);
+}
+
+.answer-feedback-mark {
+  color: #fecaca;
+  font-size: clamp(32px, 7vw, 68px);
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+}
+
+.answer-feedback-panel.is-correct .answer-feedback-mark {
+  color: #a7f3d0;
+}
+
+.answer-feedback-row {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(203, 213, 225, 0.18);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.24);
+}
+
+.answer-feedback-row span {
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.answer-feedback-row strong {
+  overflow-wrap: anywhere;
+  color: #f8fafc;
+  font-size: clamp(18px, 4vw, 30px);
 }
 
 .memorize-stage .progress progress::-webkit-progress-value {
@@ -2569,6 +2676,40 @@ textarea:focus {
 
   .prompt-word {
     font-size: clamp(42px, 18vw, 96px);
+  }
+
+  .test-stage.has-answer-input {
+    gap: 10px;
+    padding: 6px;
+  }
+
+  .test-stage.has-answer-input.is-writing {
+    min-height: calc(100dvh - 86px);
+  }
+
+  .answer-entry-panel {
+    gap: 10px;
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .answer-entry-prompt {
+    font-size: clamp(26px, 10vw, 48px);
+    line-height: 1.08;
+  }
+
+  .answer-entry-field input {
+    min-height: 48px;
+    font-size: 18px;
+  }
+
+  .answer-submit-button {
+    min-height: 44px;
+  }
+
+  .answer-feedback-panel {
+    gap: 10px;
+    padding: 14px;
   }
 
   .memory-card {

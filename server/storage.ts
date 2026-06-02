@@ -30,6 +30,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_COMPLETED_RESULT_AGE_DAYS = 366;
 const MAX_WORDS_PER_BOOK = 5000;
 const MAX_WORD_CELL_LENGTH = 200;
+const DEFAULT_TEST_WRITING_SECONDS = 3;
+const MIN_TEST_WRITING_SECONDS = 3;
+const MAX_TEST_WRITING_SECONDS = 30;
 export const MAX_JSON_UPLOAD_BYTES = 2 * 1024 * 1024;
 const JSON_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
@@ -89,6 +92,13 @@ interface StartTestInput {
   questionCount: number;
   mode: TestMode;
   displaySeconds: number;
+  writingSeconds?: number;
+  answerInputEnabled?: boolean;
+}
+
+interface AnswerSubmission {
+  index: number;
+  userAnswer: string;
 }
 
 interface WordbookStatsAccumulator {
@@ -96,6 +106,8 @@ interface WordbookStatsAccumulator {
   wordbookName: string;
   testCount: number;
   questionCount: number;
+  correctCount: number;
+  scoredQuestionCount: number;
   displaySecondsTotal: number;
   modeCounts: ModeStats;
   lastCompletedAt?: string;
@@ -486,6 +498,10 @@ export async function startTest(input: StartTestInput): Promise<TestResult> {
     badRequest("표시 시간은 3초 이상 15초 이하만 가능합니다.");
   }
 
+  const answerInputEnabled = input.answerInputEnabled === true;
+  const writingSeconds = answerInputEnabled
+    ? normalizeWritingSeconds(input.writingSeconds)
+    : DEFAULT_TEST_WRITING_SECONDS;
   const wordbook = await getWordbook(input.wordbookId, ownerId);
   const selected = takeWordsWithRepeats(wordbook.words, input.questionCount);
   const answers = selected.map((word, index) => makeAnswerEntry(word, index + 1, input.mode));
@@ -498,6 +514,8 @@ export async function startTest(input: StartTestInput): Promise<TestResult> {
     questionCount: answers.length,
     mode: input.mode,
     displaySeconds: input.displaySeconds,
+    writingSeconds,
+    answerInputEnabled,
     answers,
     createdAt: now
   };
@@ -506,8 +524,11 @@ export async function startTest(input: StartTestInput): Promise<TestResult> {
   return result;
 }
 
-export async function markResultComplete(id: string, ownerId: string): Promise<TestResult> {
+export async function markResultComplete(id: string, ownerId: string, submissions: AnswerSubmission[] = []): Promise<TestResult> {
   const result = await getResult(id, ownerId);
+  if (result.answerInputEnabled) {
+    applyAnswerSubmissions(result, submissions);
+  }
   result.completedAt = result.completedAt ?? new Date().toISOString();
   await writeJson(resultPath(id), result);
   await pruneCompletedResults(result.ownerId);
@@ -533,6 +554,10 @@ export async function listResults(ownerId: string): Promise<ResultSummary[]> {
       questionCount: result.questionCount,
       mode: result.mode,
       displaySeconds: result.displaySeconds,
+      writingSeconds: result.writingSeconds ?? DEFAULT_TEST_WRITING_SECONDS,
+      answerInputEnabled: result.answerInputEnabled === true,
+      correctCount: result.correctCount,
+      scoredQuestionCount: result.scoredQuestionCount,
       createdAt: result.createdAt,
       completedAt: result.completedAt
     }));
@@ -563,8 +588,12 @@ export async function getLearningStats(
   for (const result of records) {
     const completedAt = result.completedAt ?? result.createdAt;
     const questionCount = normalizedQuestionCount(result);
+    const scoredQuestionCount = result.scoredQuestionCount ?? 0;
+    const correctCount = result.correctCount ?? 0;
     overall.testCount += 1;
     overall.questionCount += questionCount;
+    overall.scoredQuestionCount += scoredQuestionCount;
+    overall.correctCount += correctCount;
     overall.averageDisplaySeconds += result.displaySeconds;
     overall.modeCounts[result.mode] += 1;
     overall.firstCompletedAt = overall.firstCompletedAt ?? completedAt;
@@ -583,12 +612,16 @@ export async function getLearningStats(
       wordbookName: result.wordbookName,
       testCount: 0,
       questionCount: 0,
+      correctCount: 0,
+      scoredQuestionCount: 0,
       displaySecondsTotal: 0,
       modeCounts: emptyModeStats(),
       lastCompletedAt: undefined
     };
     stats.testCount += 1;
     stats.questionCount += questionCount;
+    stats.correctCount += correctCount;
+    stats.scoredQuestionCount += scoredQuestionCount;
     stats.displaySecondsTotal += result.displaySeconds;
     stats.modeCounts[result.mode] += 1;
     stats.lastCompletedAt = completedAt;
@@ -598,6 +631,7 @@ export async function getLearningStats(
   overall.wordbookCount = byWordbook.size;
   overall.averageQuestionsPerTest = average(overall.questionCount, overall.testCount);
   overall.averageDisplaySeconds = average(overall.averageDisplaySeconds, overall.testCount);
+  overall.accuracyPercent = percentage(overall.correctCount, overall.scoredQuestionCount);
 
   const wordbooks = [...byWordbook.values()]
     .map(finalizeWordbookStats)
@@ -640,14 +674,28 @@ export function formatResult(result: TestResult, format: AnswerFormat): string {
       `퀴즈 ID: ${result.id}`,
       `생성: ${formatDate(result.createdAt)}`,
       `문제 수: ${result.questionCount}`,
+      ...(result.answerInputEnabled ? [`정답: ${result.correctCount ?? 0}/${result.scoredQuestionCount ?? result.answers.length}`] : []),
       "",
-      "번호\t문제\t정답",
-      ...result.answers.map((entry) => `${entry.index}\t${entry.prompt}\t${entry.answer}`)
+      result.answerInputEnabled ? "번호\t문제\t정답\t내 답\t결과" : "번호\t문제\t정답",
+      ...result.answers.map((entry) => result.answerInputEnabled
+        ? `${entry.index}\t${entry.prompt}\t${entry.answer}\t${entry.userAnswer ?? ""}\t${entry.isCorrect ? "정답" : "오답"}`
+        : `${entry.index}\t${entry.prompt}\t${entry.answer}`)
     ];
     return lines.join("\n");
   }
 
-  const rows = [
+  const rows = result.answerInputEnabled ? [
+    ["번호", "문제", "정답", "내 답", "결과", "문제 언어", "정답 언어"],
+    ...result.answers.map((entry) => [
+      String(entry.index),
+      entry.prompt,
+      entry.answer,
+      entry.userAnswer ?? "",
+      entry.isCorrect ? "정답" : "오답",
+      entry.promptLanguage,
+      entry.answerLanguage
+    ])
+  ] : [
     ["번호", "문제", "정답", "문제 언어", "정답 언어"],
     ...result.answers.map((entry) => [
       String(entry.index),
@@ -679,6 +727,9 @@ function emptyOverallStats(): OverallLearningStats {
   return {
     testCount: 0,
     questionCount: 0,
+    correctCount: 0,
+    scoredQuestionCount: 0,
+    accuracyPercent: 0,
     wordbookCount: 0,
     averageQuestionsPerTest: 0,
     averageDisplaySeconds: 0,
@@ -696,6 +747,9 @@ function finalizeWordbookStats(stats: WordbookStatsAccumulator): WordbookLearnin
     wordbookName: stats.wordbookName,
     testCount: stats.testCount,
     questionCount: stats.questionCount,
+    correctCount: stats.correctCount,
+    scoredQuestionCount: stats.scoredQuestionCount,
+    accuracyPercent: percentage(stats.correctCount, stats.scoredQuestionCount),
     averageQuestionsPerTest: average(stats.questionCount, stats.testCount),
     averageDisplaySeconds: average(stats.displaySecondsTotal, stats.testCount),
     modeCounts: stats.modeCounts,
@@ -712,6 +766,13 @@ function average(total: number, count: number): number {
     return 0;
   }
   return Math.round((total / count) * 10) / 10;
+}
+
+function percentage(value: number, total: number): number {
+  if (!total) {
+    return 0;
+  }
+  return Math.round((value / total) * 1000) / 10;
 }
 
 function datesBetween(fromInclusive: Date, toExclusive: Date): string[] {
@@ -964,6 +1025,72 @@ function normalizeName(value: string): string {
     badRequest("단어장 이름은 80자 이하로 입력하세요.");
   }
   return name;
+}
+
+function normalizeWritingSeconds(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < MIN_TEST_WRITING_SECONDS || value > MAX_TEST_WRITING_SECONDS) {
+    badRequest(`정답 입력 시간은 ${MIN_TEST_WRITING_SECONDS}초 이상 ${MAX_TEST_WRITING_SECONDS}초 이하만 가능합니다.`);
+  }
+  return value;
+}
+
+function applyAnswerSubmissions(result: TestResult, submissions: AnswerSubmission[]): void {
+  const byIndex = new Map<number, string>();
+  for (const submission of submissions) {
+    if (!Number.isInteger(submission.index)) {
+      continue;
+    }
+    byIndex.set(submission.index, normalizeSubmittedAnswer(submission.userAnswer));
+  }
+
+  let correctCount = 0;
+  for (const entry of result.answers) {
+    const userAnswer = byIndex.get(entry.index) ?? "";
+    const isCorrect = isCorrectAnswer(userAnswer, entry.answer);
+    entry.userAnswer = userAnswer;
+    entry.isCorrect = isCorrect;
+    if (isCorrect) {
+      correctCount += 1;
+    }
+  }
+
+  result.correctCount = correctCount;
+  result.scoredQuestionCount = result.answers.length;
+}
+
+function normalizeSubmittedAnswer(value: unknown): string {
+  if (typeof value !== "string" && typeof value !== "number") {
+    return "";
+  }
+  return String(value)
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_WORD_CELL_LENGTH);
+}
+
+function isCorrectAnswer(userAnswer: string, answer: string): boolean {
+  const normalizedUserAnswer = normalizeAnswerForCompare(userAnswer);
+  if (!normalizedUserAnswer) {
+    return false;
+  }
+  return answerAlternatives(answer).some((candidate) => normalizeAnswerForCompare(candidate) === normalizedUserAnswer);
+}
+
+function answerAlternatives(answer: string): string[] {
+  return answer
+    .split(/[;,/|]/)
+    .map((candidate) => candidate.trim())
+    .filter(Boolean)
+    .concat(answer);
+}
+
+function normalizeAnswerForCompare(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("ko-KR");
 }
 
 function normalizeDescription(value: string | undefined): string {
