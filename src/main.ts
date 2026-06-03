@@ -2142,7 +2142,7 @@ function bindEvents(): void {
 
   document.querySelectorAll<HTMLButtonElement>("[data-speak-word]").forEach((button) => {
     button.addEventListener("click", () => {
-      speakEnglishWord(button.dataset.speakWord ?? "");
+      void speakEnglishWord(button.dataset.speakWord ?? "");
     });
   });
 
@@ -4411,7 +4411,7 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
-function speakEnglishWord(value: string): void {
+async function speakEnglishWord(value: string): Promise<void> {
   const text = value.trim();
   if (!text) {
     return;
@@ -4422,11 +4422,80 @@ function speakEnglishWord(value: string): void {
   }
 
   window.speechSynthesis.cancel();
+  const voice = await resolveEnglishSpeechVoice();
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "en-US";
-  utterance.rate = 0.88;
+  if (voice) {
+    utterance.voice = voice;
+    utterance.lang = voice.lang || "en-US";
+  } else {
+    utterance.lang = "en-US";
+  }
+  utterance.rate = 0.72;
   utterance.pitch = 1;
+  utterance.volume = 1;
   window.speechSynthesis.speak(utterance);
+}
+
+async function resolveEnglishSpeechVoice(): Promise<SpeechSynthesisVoice | null> {
+  const voice = selectEnglishSpeechVoice();
+  if (voice || !("speechSynthesis" in window)) {
+    return voice;
+  }
+
+  return new Promise((resolve) => {
+    let isDone = false;
+    const finish = (): void => {
+      if (isDone) {
+        return;
+      }
+      isDone = true;
+      window.speechSynthesis.removeEventListener("voiceschanged", finish);
+      resolve(selectEnglishSpeechVoice());
+    };
+
+    window.speechSynthesis.addEventListener("voiceschanged", finish);
+    window.setTimeout(finish, 250);
+  });
+}
+
+function selectEnglishSpeechVoice(): SpeechSynthesisVoice | null {
+  if (!("speechSynthesis" in window)) {
+    return null;
+  }
+
+  const englishVoices = window.speechSynthesis
+    .getVoices()
+    .filter((voice) => /^en([_-]|$)/i.test(voice.lang));
+  if (!englishVoices.length) {
+    return null;
+  }
+
+  const preferredKeywordSets = [
+    ["microsoft", "aria"],
+    ["microsoft", "jenny"],
+    ["microsoft", "guy"],
+    ["google", "us english"],
+    ["google", "uk english"],
+    ["samantha"],
+    ["alex"],
+    ["daniel"],
+    ["english", "united states"]
+  ];
+
+  for (const keywords of preferredKeywordSets) {
+    const preferred = englishVoices.find((voice) => {
+      const searchable = `${voice.name} ${voice.lang}`.toLocaleLowerCase("en-US");
+      return keywords.every((keyword) => searchable.includes(keyword));
+    });
+    if (preferred) {
+      return preferred;
+    }
+  }
+
+  return englishVoices.find((voice) => voice.lang.toLocaleLowerCase("en-US") === "en-us" && voice.localService)
+    ?? englishVoices.find((voice) => voice.lang.toLocaleLowerCase("en-US") === "en-us")
+    ?? englishVoices.find((voice) => voice.localService)
+    ?? englishVoices[0];
 }
 
 function showToast(message: string): void {
