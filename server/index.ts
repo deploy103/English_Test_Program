@@ -202,7 +202,7 @@ app.post("/api/auth/logout", asyncRoute(async (request, response) => {
   response.status(204).end();
 }));
 
-app.post("/api/auth/password", asyncRoute(async (request, response) => {
+app.post("/api/auth/password", rateLimitAuth, asyncRoute(async (request, response) => {
   const body = request.body as { currentPassword?: string; nextPassword?: string };
   await changePassword(
     authOf(request).user,
