@@ -459,7 +459,6 @@ function render(): void {
       ${isSessionActive ? "" : renderSidebar()}
       ${!isSessionActive && isSidebarOpen ? `<button class="sidebar-backdrop" id="sidebar-backdrop" type="button" aria-label="메뉴 닫기"></button>` : ""}
       <main class="main ${isSessionActive ? "test-main" : ""}">
-        ${toastMessage ? `<div class="toast" role="status">${escapeHtml(toastMessage)}</div>` : ""}
         ${renderTopActions()}
         ${renderMainContent()}
       </main>
@@ -486,7 +485,6 @@ function renderMainContent(): string {
 function renderAuthPage(): string {
   return `
     <main class="auth-page">
-      ${toastMessage ? `<div class="toast" role="status">${escapeHtml(toastMessage)}</div>` : ""}
       <section class="auth-panel">
         <div class="auth-brand">
           <div class="brand-mark">VS</div>
@@ -4433,23 +4431,36 @@ function speakEnglishWord(value: string): void {
 
 function showToast(message: string): void {
   toastMessage = message;
-  const toast = document.querySelector<HTMLElement>(".toast");
-  if (toast) {
-    toast.textContent = message;
-  } else {
-    render();
-  }
+  const toast = ensureToastElement();
+  toast.textContent = message;
   window.setTimeout(() => {
     if (toastMessage === message) {
       toastMessage = "";
-      document.querySelector<HTMLElement>(".toast")?.remove();
+      removeToastElements();
     }
   }, 2600);
 }
 
 function clearToast(): void {
   toastMessage = "";
-  document.querySelector<HTMLElement>(".toast")?.remove();
+  removeToastElements();
+}
+
+function ensureToastElement(): HTMLElement {
+  const existing = document.querySelector<HTMLElement>(".toast");
+  if (existing) {
+    return existing;
+  }
+
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.setAttribute("role", "status");
+  document.body.appendChild(toast);
+  return toast;
+}
+
+function removeToastElements(): void {
+  document.querySelectorAll<HTMLElement>(".toast").forEach((toast) => toast.remove());
 }
 
 function clearTimer(): void {
