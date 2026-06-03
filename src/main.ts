@@ -2421,6 +2421,11 @@ function bindAuthEvents(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-auth-mode]").forEach((button) => {
     button.addEventListener("click", () => {
       authMode = button.dataset.authMode === "register" ? "register" : "login";
+      if (authMode === "register") {
+        loginDraft.password = "";
+      } else {
+        registerDraft.password = "";
+      }
       clearToast();
       render();
     });
