@@ -2568,6 +2568,15 @@ textarea:focus {
 }
 
 @media (max-width: 900px) {
+  .app-shell:not(.is-testing) .app-bar {
+    position: static;
+    margin: 12px 16px 0;
+  }
+
+  .app-shell:not(.is-testing) .main {
+    padding-top: 16px;
+  }
+
   .main {
     padding-right: 16px;
     padding-left: 16px;
