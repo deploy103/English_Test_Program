@@ -31,8 +31,6 @@ const MAX_COMPLETED_RESULT_AGE_DAYS = 366;
 const MAX_WORDS_PER_BOOK = 5000;
 const MAX_WORD_CELL_LENGTH = 200;
 const DEFAULT_TEST_WRITING_SECONDS = 3;
-const MIN_TEST_WRITING_SECONDS = 3;
-const MAX_TEST_WRITING_SECONDS = 30;
 export const MAX_JSON_UPLOAD_MEGABYTES = 5;
 export const MAX_JSON_UPLOAD_BYTES = MAX_JSON_UPLOAD_MEGABYTES * 1024 * 1024;
 const JSON_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
@@ -500,9 +498,7 @@ export async function startTest(input: StartTestInput): Promise<TestResult> {
   }
 
   const answerInputEnabled = input.answerInputEnabled === true;
-  const writingSeconds = answerInputEnabled
-    ? normalizeWritingSeconds(input.writingSeconds)
-    : DEFAULT_TEST_WRITING_SECONDS;
+  const writingSeconds = DEFAULT_TEST_WRITING_SECONDS;
   const wordbook = await getWordbook(input.wordbookId, ownerId);
   const selected = takeWordsWithRepeats(wordbook.words, input.questionCount);
   const answers = selected.map((word, index) => makeAnswerEntry(word, index + 1, input.mode));
@@ -1026,13 +1022,6 @@ function normalizeName(value: string): string {
     badRequest("단어장 이름은 80자 이하로 입력하세요.");
   }
   return name;
-}
-
-function normalizeWritingSeconds(value: number | undefined): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < MIN_TEST_WRITING_SECONDS || value > MAX_TEST_WRITING_SECONDS) {
-    badRequest(`정답 입력 시간은 ${MIN_TEST_WRITING_SECONDS}초 이상 ${MAX_TEST_WRITING_SECONDS}초 이하만 가능합니다.`);
-  }
-  return value;
 }
 
 function applyAnswerSubmissions(result: TestResult, submissions: AnswerSubmission[]): void {
