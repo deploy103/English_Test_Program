@@ -1789,11 +1789,12 @@ function renderModeStat(label: string, value: number): string {
 
 function renderDailyStat(entry: DailyLearningStats, maxQuestions: number): string {
   const heightPercent = Math.max(6, Math.round((entry.questionCount / maxQuestions) * 100));
+  const heightClass = `height-${Math.max(5, Math.min(100, Math.ceil(heightPercent / 5) * 5))}`;
   return `
     <div class="stats-bar-item">
       <span class="stats-bar-value">${entry.questionCount ? formatCount(entry.questionCount) : ""}</span>
       <div class="stats-bar-track">
-        <div class="stats-bar-fill" style="height: ${heightPercent}%"></div>
+        <div class="stats-bar-fill ${heightClass}"></div>
       </div>
       <span class="stats-bar-label">${formatShortDate(entry.date)}</span>
     </div>
