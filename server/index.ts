@@ -588,9 +588,12 @@ function securityHeaders(request: Request, response: Response, next: NextFunctio
   const styleSrc = process.env.NODE_ENV === "production"
     ? "style-src 'self'"
     : "style-src 'self' 'unsafe-inline'";
+  const connectSrc = process.env.NODE_ENV === "production"
+    ? "connect-src 'self'"
+    : "connect-src 'self' ws: wss:";
   response.setHeader(
     "Content-Security-Policy",
-    `default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; script-src 'self'; ${styleSrc}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`
+    `default-src 'self'; ${connectSrc}; img-src 'self' data:; script-src 'self'; ${styleSrc}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`
   );
   next();
 }
