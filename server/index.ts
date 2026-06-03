@@ -128,6 +128,7 @@ app.use(rejectCrossSiteWrites);
 app.use(rejectCrossOriginWrites);
 app.use("/api", rejectUnsupportedApiContentType);
 app.use(express.json({ limit: `${MAX_JSON_UPLOAD_MEGABYTES}mb` }));
+app.use("/api", ensureApiRequestBodyObject);
 app.use("/api", (_request, response, next) => {
   response.setHeader("Cache-Control", "no-store");
   next();
@@ -646,24 +647,76 @@ function rejectUnsupportedApiContentType(request: Request, response: Response, n
 
   const contentType = request.get("content-type");
   if (!contentType) {
+    if (hasRequestBody(request)) {
+      rejectContentType(request, response, "missing");
+      return;
+    }
     next();
     return;
   }
 
   const mimeType = contentType.split(";")[0].trim().toLowerCase();
-  if (mimeType === "application/json" || mimeType === "multipart/form-data") {
+  if (mimeType === "application/json" || (mimeType === "multipart/form-data" && isApiUploadRoute(request))) {
     next();
     return;
   }
 
+  rejectContentType(request, response, contentType);
+}
+
+function ensureApiRequestBodyObject(request: Request, response: Response, next: NextFunction): void {
+  if (["GET", "HEAD", "OPTIONS"].includes(request.method) || isMultipartRequest(request)) {
+    next();
+    return;
+  }
+
+  if (request.body === undefined) {
+    request.body = {};
+    next();
+    return;
+  }
+
+  if (!isPlainObject(request.body)) {
+    response.status(400).json({ message: "요청 본문은 JSON 객체여야 합니다." });
+    return;
+  }
+
+  next();
+}
+
+function rejectContentType(request: Request, response: Response, value: string): void {
   void appendAuditLog({
     event: "security.content_type_reject",
     result: "failure",
     ipAddress: requestMetaFrom(request).ipAddress,
     userAgent: requestMetaFrom(request).userAgent,
-    message: `content-type=${contentType}`
+    message: `content-type=${value}`
   });
   response.status(415).json({ message: "지원하지 않는 요청 형식입니다." });
+}
+
+function isApiUploadRoute(request: Request): boolean {
+  const pathname = request.originalUrl.split("?")[0];
+  return request.method === "POST" && (
+    pathname === "/api/wordbooks/upload" ||
+    pathname === "/api/admin/library-wordbooks/upload"
+  );
+}
+
+function isMultipartRequest(request: Request): boolean {
+  return normalizeMimeType(request.get("content-type") ?? "") === "multipart/form-data";
+}
+
+function hasRequestBody(request: Request): boolean {
+  const contentLength = request.get("content-length");
+  if (contentLength && Number(contentLength) > 0) {
+    return true;
+  }
+  return Boolean(request.get("transfer-encoding"));
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function validateJsonUploadMetadata(file: Express.Multer.File): Error | null {

@@ -2491,7 +2491,7 @@ async function login(formData: FormData): Promise<void> {
     });
     await applyAuthenticatedState(auth);
     showToast("로그인했습니다.");
-  });
+  }, { renderBusy: false });
 }
 
 async function register(formData: FormData): Promise<void> {
@@ -2514,7 +2514,7 @@ async function register(formData: FormData): Promise<void> {
     });
     await applyAuthenticatedState(auth);
     showToast(currentUser?.role === "admin" ? "관리자 계정을 생성했습니다." : "회원가입을 완료했습니다.");
-  });
+  }, { renderBusy: false });
 }
 
 async function applyAuthenticatedState(auth: AuthResponse): Promise<void> {
@@ -3853,20 +3853,25 @@ async function refreshAndRender(): Promise<void> {
   render();
 }
 
-async function withBusy(work: () => Promise<void>): Promise<void> {
+async function withBusy(work: () => Promise<void>, options: { renderBusy?: boolean } = {}): Promise<void> {
   if (isBusy) {
     return;
   }
 
   isBusy = true;
-  render();
+  const shouldRenderBusy = options.renderBusy ?? true;
+  if (shouldRenderBusy) {
+    render();
+  }
   try {
     await work();
   } catch (error) {
     showToast(error instanceof Error ? error.message : "작업에 실패했습니다.");
   } finally {
     isBusy = false;
-    render();
+    if (shouldRenderBusy) {
+      render();
+    }
   }
 }
 
