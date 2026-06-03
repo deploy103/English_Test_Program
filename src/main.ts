@@ -309,6 +309,7 @@ let activeTest: ActiveTest | null = null;
 let activeMemorize: ActiveMemorize | null = null;
 let timer: number | null = null;
 let toastMessage = "";
+let toastVersion = 0;
 let isBusy = false;
 let isStatsLoading = false;
 let isSidebarOpen = false;
@@ -4500,10 +4501,12 @@ function selectEnglishSpeechVoice(): SpeechSynthesisVoice | null {
 
 function showToast(message: string): void {
   toastMessage = message;
+  toastVersion += 1;
+  const version = toastVersion;
   const toast = ensureToastElement();
   toast.textContent = message;
   window.setTimeout(() => {
-    if (toastMessage === message) {
+    if (toastVersion === version && toastMessage === message) {
       toastMessage = "";
       removeToastElements();
     }
@@ -4511,6 +4514,7 @@ function showToast(message: string): void {
 }
 
 function clearToast(): void {
+  toastVersion += 1;
   toastMessage = "";
   removeToastElements();
 }
