@@ -401,6 +401,7 @@ a {
 
 [data-theme="dark"] .field span,
 [data-theme="dark"] .segmented legend,
+[data-theme="dark"] .checkbox-field,
 [data-theme="dark"] .group-rename-form label span,
 [data-theme="dark"] .side-heading,
 [data-theme="dark"] .book-detail p,
@@ -1270,6 +1271,10 @@ a {
   border-color: rgba(148, 163, 184, 0.22);
   background:
     linear-gradient(135deg, rgba(15, 23, 42, 0.72), rgba(30, 41, 59, 0.66));
+}
+
+[data-theme="dark"] .file-field {
+  color: #cbd5e1;
 }
 
 .session-card.is-current {
