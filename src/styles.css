@@ -2605,14 +2605,17 @@ textarea:focus {
   .answer-table-wrap {
     display: none;
   }
+
+  .wordbook-table-wrap {
+    display: block;
+  }
 }
 
 @media (max-width: 560px) {
   .app-bar {
+    position: static;
     grid-template-columns: 44px minmax(0, 1fr) auto;
-    top: 8px;
-    right: 8px;
-    left: 8px;
+    margin: 8px;
     padding: 8px 10px;
     border-radius: 20px;
   }
@@ -2641,7 +2644,7 @@ textarea:focus {
   }
 
   .main {
-    padding: 96px 12px 18px;
+    padding: 10px 12px 18px;
   }
 
   .test-main {
