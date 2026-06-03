@@ -36,3 +36,14 @@ npm run dev
 ```
 
 기본 주소는 `http://localhost:3000`입니다.
+
+## 운영 배포
+
+```bash
+npm run build
+npm start
+```
+
+- `APP_ORIGIN` 또는 `APP_ORIGINS`에 실제 서비스 주소를 설정하면 API 쓰기 요청의 Origin 검증에 사용됩니다.
+- HTTPS 리버스 프록시 뒤에서 실행하면 `TRUST_PROXY=1`을 설정하세요.
+- 프록시 설정과 무관하게 로그인 쿠키에 Secure 속성을 강제하려면 `COOKIE_SECURE=1`을 설정하세요.
