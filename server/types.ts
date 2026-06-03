@@ -84,6 +84,7 @@ export interface AuditLogEntry {
 export interface WordEntry {
   english: string;
   korean: string;
+  partOfSpeech?: string;
 }
 
 export interface WordbookRecord {

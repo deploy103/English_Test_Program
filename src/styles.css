@@ -1858,6 +1858,55 @@ textarea:focus {
   gap: 8px;
 }
 
+.wordbook-detail-layout {
+  display: grid;
+}
+
+.wordbook-view-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.wordbook-view-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.wordbook-view-head h3,
+.wordbook-view-head p {
+  margin: 0;
+}
+
+.wordbook-view-head p {
+  margin-top: 6px;
+  color: #66747f;
+  font-size: 13px;
+}
+
+.wordbook-table {
+  min-width: 760px;
+}
+
+.wordbook-english {
+  overflow-wrap: anywhere;
+  color: #111827;
+  font-size: 16px;
+}
+
+[data-theme="dark"] .wordbook-english {
+  color: #f8fafc;
+}
+
+[data-theme="dark"] .wordbook-view-head p {
+  color: #a8b5c2;
+}
+
+.speak-button {
+  min-width: 58px;
+}
+
 .detail-panel {
   display: grid;
   gap: 18px;
@@ -2694,6 +2743,19 @@ textarea:focus {
 
   .manage-actions > * {
     flex: 1;
+  }
+
+  .wordbook-view-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .wordbook-table {
+    min-width: 680px;
+  }
+
+  .speak-button {
+    width: 100%;
   }
 
   .group-heading {

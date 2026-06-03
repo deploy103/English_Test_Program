@@ -41,6 +41,7 @@ interface WordbookDetail extends WordbookSummary {
 interface WordEntry {
   english: string;
   korean: string;
+  partOfSpeech?: string;
 }
 
 interface AnswerEntry {
@@ -143,6 +144,19 @@ interface StatsRangeDraft {
   to: string;
 }
 
+interface LoginDraft {
+  identifier: string;
+  password: string;
+  rememberMe: boolean;
+}
+
+interface RegisterDraft {
+  email: string;
+  loginId: string;
+  name: string;
+  password: string;
+}
+
 interface TestSettingsDraft {
   questionCount: number;
   mode: TestMode;
@@ -228,7 +242,7 @@ interface AuthSessionSummary {
 type AuthMode = "login" | "register";
 type TabKey = "home" | "test" | "memorize" | "add" | "settings" | "groups" | "manage" | "answers" | "stats" | "admin";
 type PlayPageKey = "testPlay" | "memorizePlay";
-type PageKey = TabKey | PlayPageKey | "answerDetail";
+type PageKey = TabKey | PlayPageKey | "answerDetail" | "wordbookDetail";
 type ActivePhase = "countdown" | "prompt" | "writing" | "feedback" | "done";
 type MemorizeDisplayMode = "en" | "ko" | "both";
 type MemorizePhase = "prompt" | "answer" | "done";
@@ -287,6 +301,8 @@ let results: ResultSummary[] = [];
 let stats: LearningStats | null = null;
 let statsRangeDraft: StatsRangeDraft = defaultStatsRangeDraft();
 let selectedWordbookId = "";
+let selectedWordbookDetail: WordbookDetail | null = null;
+let selectedWordbookDetailId = "";
 let selectedResult: TestResult | null = null;
 let selectedResultId = "";
 let activeTest: ActiveTest | null = null;
@@ -297,11 +313,15 @@ let isBusy = false;
 let isStatsLoading = false;
 let isSidebarOpen = false;
 let isAnswerLoading = false;
+let isWordbookDetailLoading = false;
 let answerRequestToken = 0;
+let wordbookDetailRequestToken = 0;
 let currentUser: CurrentUser | null = null;
 let csrfToken = "";
 let authHasUsers = true;
 let authMode: AuthMode = "login";
+let loginDraft: LoginDraft = defaultLoginDraft();
+let registerDraft: RegisterDraft = defaultRegisterDraft();
 let adminUsers: AdminUserSummary[] = [];
 let adminWordbooks: AdminWordbookSummary[] = [];
 let adminLibraryWordbooks: LibraryWordbookSummary[] = [];
@@ -492,14 +512,14 @@ function renderLoginForm(): string {
     <form class="auth-form" id="login-form">
       <label class="field">
         <span>아이디 또는 이메일</span>
-        <input name="identifier" type="text" autocomplete="username" required />
+        <input name="identifier" type="text" autocomplete="username" value="${escapeAttribute(loginDraft.identifier)}" required />
       </label>
       <label class="field">
         <span>비밀번호</span>
-        <input name="password" type="password" autocomplete="current-password" required />
+        <input name="password" type="password" autocomplete="current-password" value="${escapeAttribute(loginDraft.password)}" required />
       </label>
       <label class="checkbox-field">
-        <input name="rememberMe" type="checkbox" value="1" />
+        <input name="rememberMe" type="checkbox" value="1" ${loginDraft.rememberMe ? "checked" : ""} />
         <span>자동 로그인</span>
       </label>
       <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>${isBusy ? "확인 중..." : "로그인"}</button>
@@ -512,19 +532,19 @@ function renderRegisterForm(): string {
     <form class="auth-form" id="register-form">
       <label class="field">
         <span>이메일</span>
-        <input name="email" type="email" autocomplete="email" maxlength="254" required />
+        <input name="email" type="email" autocomplete="email" maxlength="254" value="${escapeAttribute(registerDraft.email)}" required />
       </label>
       <label class="field">
         <span>아이디</span>
-        <input name="loginId" type="text" autocomplete="username" maxlength="32" pattern="[A-Za-z0-9._-]{3,32}" required />
+        <input name="loginId" type="text" autocomplete="username" maxlength="32" pattern="[A-Za-z0-9._-]{3,32}" value="${escapeAttribute(registerDraft.loginId)}" required />
       </label>
       <label class="field">
         <span>이름</span>
-        <input name="name" type="text" autocomplete="name" maxlength="60" required />
+        <input name="name" type="text" autocomplete="name" maxlength="60" value="${escapeAttribute(registerDraft.name)}" required />
       </label>
       <label class="field">
         <span>비밀번호</span>
-        <input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
+        <input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" value="${escapeAttribute(registerDraft.password)}" required />
       </label>
       <p class="auth-hint">비밀번호는 8자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.</p>
       <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>${isBusy ? "생성 중..." : "회원가입"}</button>
@@ -774,6 +794,9 @@ function renderCurrentTab(): string {
   if (page === "answerDetail") {
     return renderAnswerDetailPage();
   }
+  if (page === "wordbookDetail") {
+    return renderWordbookDetailPage();
+  }
   return renderTestTab();
 }
 
@@ -994,7 +1017,7 @@ function renderAddTab(): string {
         </label>
         <label class="field textarea-field">
           <span>단어</span>
-          <textarea name="words" data-draft-field="manualWords" rows="12" spellcheck="false" placeholder="apple = 사과&#10;take place, 일어나다&#10;valid&#9;타당한">${escapeHtml(addDraft.manualWords)}</textarea>
+          <textarea name="words" data-draft-field="manualWords" rows="12" spellcheck="false" placeholder="apple = 사과 = noun&#10;take place, 일어나다&#10;valid&#9;타당한&#9;adjective">${escapeHtml(addDraft.manualWords)}</textarea>
         </label>
         <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>저장</button>
       </form>
@@ -1343,6 +1366,7 @@ function renderWordEntryTable(words: WordEntry[]): string {
             <th>번호</th>
             <th>영어</th>
             <th>한글</th>
+            <th>품사</th>
           </tr>
         </thead>
         <tbody>
@@ -1351,6 +1375,7 @@ function renderWordEntryTable(words: WordEntry[]): string {
               <td>${index + 1}</td>
               <td>${escapeHtml(word.english)}</td>
               <td>${escapeHtml(word.korean)}</td>
+              <td>${word.partOfSpeech ? escapeHtml(word.partOfSpeech) : `<span class="muted">-</span>`}</td>
             </tr>
           `).join("")}
         </tbody>
@@ -1454,6 +1479,7 @@ function renderManageItem(book: WordbookSummary): string {
         ${book.description ? `<p class="muted">${escapeHtml(book.description)}</p>` : ""}
       </div>
       <div class="manage-actions">
+        <a class="ghost-button" href="${wordbookDetailPath(book.id)}" data-route>보기</a>
         <button class="ghost-button" data-use-wordbook-id="${book.id}" type="button">퀴즈</button>
         <button class="ghost-button" data-memorize-wordbook-id="${book.id}" type="button">암기</button>
         <button class="ghost-button" data-edit-wordbook-id="${book.id}" type="button">편집</button>
@@ -1461,6 +1487,75 @@ function renderManageItem(book: WordbookSummary): string {
         <button class="danger-button" data-delete-wordbook-id="${book.id}" type="button">삭제</button>
       </div>
     </article>
+  `;
+}
+
+function renderWordbookDetailPage(): string {
+  const detail = selectedWordbookDetail;
+  const summary = detail
+    ? `${escapeHtml(detail.group || DEFAULT_GROUP_NAME)} · ${detail.wordCount}개 단어 · ${formatDate(detail.updatedAt)}`
+    : "단어장";
+
+  return `
+    <section class="page-header">
+      <div>
+        <p class="eyebrow">단어장 보기</p>
+        <h2>${detail ? escapeHtml(detail.name) : "단어장"}</h2>
+      </div>
+      <div class="header-actions">
+        <a class="ghost-button" href="${TAB_ROUTES.manage}" data-route>목록</a>
+        ${detail ? `<button class="ghost-button" data-use-wordbook-id="${detail.id}" type="button">퀴즈</button>` : ""}
+        ${detail ? `<button class="ghost-button" data-memorize-wordbook-id="${detail.id}" type="button">암기</button>` : ""}
+      </div>
+    </section>
+
+    <section class="wordbook-detail-layout">
+      <article class="panel wordbook-view-panel">
+        ${isWordbookDetailLoading
+          ? `<div class="empty-note">단어장을 불러오는 중입니다.</div>`
+          : detail
+            ? `
+              <div class="wordbook-view-head">
+                <div>
+                  <h3>${escapeHtml(detail.name)}</h3>
+                  <p>${summary}</p>
+                  ${detail.description ? `<p class="muted">${escapeHtml(detail.description)}</p>` : ""}
+                </div>
+              </div>
+              ${renderWordbookVocabularyTable(detail.words)}
+            `
+            : `<div class="empty-note">확인할 단어장을 선택하세요.</div>`}
+      </article>
+    </section>
+  `;
+}
+
+function renderWordbookVocabularyTable(words: WordEntry[]): string {
+  return `
+    <div class="answer-table-wrap wordbook-table-wrap">
+      <table class="answer-table wordbook-table">
+        <thead>
+          <tr>
+            <th>번호</th>
+            <th>영어</th>
+            <th>뜻</th>
+            <th>품사</th>
+            <th>발음</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${words.map((word, index) => `
+            <tr>
+              <td>${index + 1}</td>
+              <td><strong class="wordbook-english">${escapeHtml(word.english)}</strong></td>
+              <td>${escapeHtml(word.korean)}</td>
+              <td>${word.partOfSpeech ? escapeHtml(word.partOfSpeech) : `<span class="muted">-</span>`}</td>
+              <td><button class="ghost-button mini-button speak-button" data-speak-word="${escapeAttribute(word.english)}" type="button">듣기</button></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -2047,6 +2142,12 @@ function bindEvents(): void {
     });
   });
 
+  document.querySelectorAll<HTMLButtonElement>("[data-speak-word]").forEach((button) => {
+    button.addEventListener("click", () => {
+      speakEnglishWord(button.dataset.speakWord ?? "");
+    });
+  });
+
   document.querySelectorAll<HTMLButtonElement>("[data-wordbook-id]").forEach((button) => {
     button.addEventListener("click", () => {
       selectedWordbookId = button.dataset.wordbookId ?? "";
@@ -2326,13 +2427,29 @@ function bindAuthEvents(): void {
     });
   });
 
-  document.querySelector<HTMLFormElement>("#login-form")?.addEventListener("submit", (event) => {
+  const loginForm = document.querySelector<HTMLFormElement>("#login-form");
+  loginForm?.addEventListener("input", () => {
+    syncLoginDraftFromForm(loginForm);
+  });
+  loginForm?.addEventListener("change", () => {
+    syncLoginDraftFromForm(loginForm);
+  });
+  loginForm?.addEventListener("submit", (event) => {
     event.preventDefault();
+    syncLoginDraftFromForm(loginForm);
     void login(new FormData(event.currentTarget as HTMLFormElement));
   });
 
-  document.querySelector<HTMLFormElement>("#register-form")?.addEventListener("submit", (event) => {
+  const registerForm = document.querySelector<HTMLFormElement>("#register-form");
+  registerForm?.addEventListener("input", () => {
+    syncRegisterDraftFromForm(registerForm);
+  });
+  registerForm?.addEventListener("change", () => {
+    syncRegisterDraftFromForm(registerForm);
+  });
+  registerForm?.addEventListener("submit", (event) => {
     event.preventDefault();
+    syncRegisterDraftFromForm(registerForm);
     void register(new FormData(event.currentTarget as HTMLFormElement));
   });
 }
@@ -2353,6 +2470,11 @@ async function loadAuthState(): Promise<void> {
 }
 
 async function login(formData: FormData): Promise<void> {
+  loginDraft = {
+    identifier: String(formData.get("identifier") ?? ""),
+    password: String(formData.get("password") ?? ""),
+    rememberMe: formData.get("rememberMe") === "1"
+  };
   await withBusy(async () => {
     const auth = await api<AuthResponse>("/api/auth/login", {
       method: "POST",
@@ -2369,6 +2491,12 @@ async function login(formData: FormData): Promise<void> {
 }
 
 async function register(formData: FormData): Promise<void> {
+  registerDraft = {
+    email: String(formData.get("email") ?? ""),
+    loginId: String(formData.get("loginId") ?? ""),
+    name: String(formData.get("name") ?? ""),
+    password: String(formData.get("password") ?? "")
+  };
   await withBusy(async () => {
     const auth = await api<AuthResponse>("/api/auth/register", {
       method: "POST",
@@ -2393,6 +2521,7 @@ async function applyAuthenticatedState(auth: AuthResponse): Promise<void> {
     throw new Error("인증 응답이 올바르지 않습니다.");
   }
 
+  resetAuthDrafts();
   if (window.location.pathname === "/") {
     window.history.replaceState(null, "", TAB_ROUTES.home);
   }
@@ -2612,16 +2741,20 @@ function resetAuthenticatedState(): void {
   isAdminWordbookLoading = false;
   isAdminLibraryWordbookLoading = false;
   selectedWordbookId = "";
+  selectedWordbookDetail = null;
+  selectedWordbookDetailId = "";
   selectedResult = null;
   selectedResultId = "";
   activeTest = null;
   activeMemorize = null;
   isStatsLoading = false;
+  isWordbookDetailLoading = false;
   wordbookSearch = "";
   answerSearch = "";
   editingWordbookId = "";
   authSessions = [];
   clearTimer();
+  resetAuthDrafts();
 }
 
 async function beginTest(formData: FormData): Promise<void> {
@@ -2828,6 +2961,39 @@ async function loadResultDetail(id: string): Promise<void> {
   }
 }
 
+async function loadWordbookDetail(id: string): Promise<void> {
+  const requestToken = ++wordbookDetailRequestToken;
+  selectedWordbookDetailId = id;
+  if (selectedWordbookDetail?.id !== id) {
+    selectedWordbookDetail = null;
+  }
+  isWordbookDetailLoading = true;
+  clearToast();
+  render();
+
+  try {
+    const detail = await api<WordbookDetail>(`/api/wordbooks/${id}`);
+    if (requestToken !== wordbookDetailRequestToken) {
+      return;
+    }
+    selectedWordbookDetail = detail;
+    selectedWordbookId = detail.id;
+  } catch (error) {
+    if (requestToken !== wordbookDetailRequestToken) {
+      return;
+    }
+    selectedWordbookDetail = null;
+    selectedWordbookDetailId = "";
+    showToast(error instanceof Error ? error.message : "단어장을 불러오지 못했습니다.");
+    navigateToTab("manage", true);
+  } finally {
+    if (requestToken === wordbookDetailRequestToken) {
+      isWordbookDetailLoading = false;
+      render();
+    }
+  }
+}
+
 async function loadStats(): Promise<void> {
   if (!currentUser) {
     return;
@@ -2896,6 +3062,11 @@ async function deleteWordbookById(id: string): Promise<void> {
     }
     if (editingWordbookId === id) {
       editingWordbookId = "";
+    }
+    if (selectedWordbookDetailId === id) {
+      selectedWordbookDetail = null;
+      selectedWordbookDetailId = "";
+      navigateToTab("manage", true);
     }
     showToast("단어장을 삭제했습니다.");
     await refreshAll();
@@ -3523,10 +3694,25 @@ async function syncPageData(): Promise<void> {
     return;
   }
 
+  if (page === "wordbookDetail") {
+    if (!selectedWordbookDetailId) {
+      navigateToTab("manage", true);
+      return;
+    }
+    await loadWordbookDetail(selectedWordbookDetailId);
+    return;
+  }
+
   if (page === "answers") {
     selectedResult = null;
     selectedResultId = "";
     isAnswerLoading = false;
+  }
+
+  if (page === "manage") {
+    selectedWordbookDetail = null;
+    selectedWordbookDetailId = "";
+    isWordbookDetailLoading = false;
   }
 
   if (page === "stats") {
@@ -3544,16 +3730,27 @@ function applyRouteFromLocation(): void {
 
   if (parsed.page === "answerDetail") {
     selectedResultId = parsed.resultId ?? "";
+    selectedWordbookDetail = null;
+    selectedWordbookDetailId = "";
+    return;
+  }
+
+  if (parsed.page === "wordbookDetail") {
+    selectedWordbookDetailId = parsed.wordbookId ?? "";
+    selectedResultId = "";
+    selectedResult = null;
     return;
   }
 
   selectedResultId = "";
+  selectedWordbookDetailId = "";
+  selectedWordbookDetail = null;
   if (parsed.page !== "answers") {
     selectedResult = null;
   }
 }
 
-function parseRoute(pathname: string): { page: PageKey; resultId?: string } {
+function parseRoute(pathname: string): { page: PageKey; resultId?: string; wordbookId?: string } {
   const segments = pathname.split("/").filter(Boolean).map(safeDecodePathSegment);
 
   if (segments[0] === "test" && segments[1] === "play") {
@@ -3576,6 +3773,9 @@ function parseRoute(pathname: string): { page: PageKey; resultId?: string } {
   }
   if (segments[0] === "wordbooks" && segments.length === 1) {
     return { page: "manage" };
+  }
+  if (segments[0] === "wordbooks" && segments[1]) {
+    return { page: "wordbookDetail", wordbookId: segments[1] };
   }
   if (segments[0] === "settings" || segments[0] === "me") {
     return { page: "settings" };
@@ -3623,6 +3823,15 @@ async function refreshAndRender(): Promise<void> {
       await loadResultDetail(selectedResultId);
     } else {
       navigateToTab("answers", true);
+    }
+    return;
+  }
+
+  if (page === "wordbookDetail") {
+    if (selectedWordbookDetailId) {
+      await loadWordbookDetail(selectedWordbookDetailId);
+    } else {
+      navigateToTab("manage", true);
     }
     return;
   }
@@ -3703,11 +3912,19 @@ function parseManualWords(value: string): WordEntry[] {
 function parseManualLine(line: string): WordEntry | null {
   const separators = ["\t", "=", ",", "|"];
   for (const separator of separators) {
-    const index = line.indexOf(separator);
-    if (index > 0) {
-      const english = line.slice(0, index).trim();
-      const korean = line.slice(index + separator.length).trim();
-      return english && korean ? { english, korean } : null;
+    const columns = line
+      .split(separator)
+      .map((column) => column.trim())
+      .filter(Boolean);
+    if (columns.length >= 2) {
+      const [english, firstKorean, ...rest] = columns;
+      const korean = separator === "," ? [firstKorean, ...rest].join(", ") : firstKorean;
+      const partOfSpeech = separator === "," ? "" : rest.join(" ").slice(0, 40).trim();
+      return english && korean
+        ? partOfSpeech
+          ? { english, korean, partOfSpeech }
+          : { english, korean }
+        : null;
     }
   }
   return null;
@@ -3819,6 +4036,47 @@ function updateAddDraftField(field: HTMLInputElement | HTMLTextAreaElement | HTM
     return;
   }
   addDraft[key] = field.value;
+}
+
+function syncLoginDraftFromForm(form: HTMLFormElement): void {
+  const formData = new FormData(form);
+  loginDraft = {
+    identifier: String(formData.get("identifier") ?? ""),
+    password: String(formData.get("password") ?? ""),
+    rememberMe: formData.get("rememberMe") === "1"
+  };
+}
+
+function syncRegisterDraftFromForm(form: HTMLFormElement): void {
+  const formData = new FormData(form);
+  registerDraft = {
+    email: String(formData.get("email") ?? ""),
+    loginId: String(formData.get("loginId") ?? ""),
+    name: String(formData.get("name") ?? ""),
+    password: String(formData.get("password") ?? "")
+  };
+}
+
+function defaultLoginDraft(): LoginDraft {
+  return {
+    identifier: "",
+    password: "",
+    rememberMe: false
+  };
+}
+
+function defaultRegisterDraft(): RegisterDraft {
+  return {
+    email: "",
+    loginId: "",
+    name: "",
+    password: ""
+  };
+}
+
+function resetAuthDrafts(): void {
+  loginDraft = defaultLoginDraft();
+  registerDraft = defaultRegisterDraft();
 }
 
 function syncTestSettingsDraftFromForm(form: HTMLFormElement): void {
@@ -3975,9 +4233,16 @@ function answerDetailPath(id: string): string {
   return `/answers/${encodeURIComponent(id)}`;
 }
 
+function wordbookDetailPath(id: string): string {
+  return `/wordbooks/${encodeURIComponent(id)}`;
+}
+
 function tabForPage(value: PageKey): TabKey {
   if (value === "answerDetail") {
     return "answers";
+  }
+  if (value === "wordbookDetail") {
+    return "manage";
   }
   if (value === "testPlay") {
     return "test";
@@ -3991,6 +4256,9 @@ function tabForPage(value: PageKey): TabKey {
 function pageLabel(value: PageKey): string {
   if (value === "answerDetail") {
     return "기록 상세";
+  }
+  if (value === "wordbookDetail") {
+    return "단어장 보기";
   }
   if (value === "testPlay") {
     return "퀴즈 진행";
@@ -4145,18 +4413,43 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
+function speakEnglishWord(value: string): void {
+  const text = value.trim();
+  if (!text) {
+    return;
+  }
+  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+    showToast("이 브라우저에서는 발음을 지원하지 않습니다.");
+    return;
+  }
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "en-US";
+  utterance.rate = 0.88;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
+}
+
 function showToast(message: string): void {
   toastMessage = message;
+  const toast = document.querySelector<HTMLElement>(".toast");
+  if (toast) {
+    toast.textContent = message;
+  } else {
+    render();
+  }
   window.setTimeout(() => {
     if (toastMessage === message) {
       toastMessage = "";
-      render();
+      document.querySelector<HTMLElement>(".toast")?.remove();
     }
   }, 2600);
 }
 
 function clearToast(): void {
   toastMessage = "";
+  document.querySelector<HTMLElement>(".toast")?.remove();
 }
 
 function clearTimer(): void {

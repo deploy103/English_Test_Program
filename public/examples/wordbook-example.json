@@ -5,23 +5,28 @@
   "words": [
     {
       "english": "possibility",
-      "korean": "가능성"
+      "korean": "가능성",
+      "partOfSpeech": "noun"
     },
     {
       "english": "separate",
-      "korean": "별개의, 분리된"
+      "korean": "별개의, 분리된",
+      "partOfSpeech": "adjective"
     },
     {
       "english": "incredibly",
-      "korean": "매우, 믿기 힘들 정도로"
+      "korean": "매우, 믿기 힘들 정도로",
+      "partOfSpeech": "adverb"
     },
     {
       "english": "be willing to",
-      "korean": "기꺼이 ~하다"
+      "korean": "기꺼이 ~하다",
+      "partOfSpeech": "phrase"
     },
     {
       "english": "come up with",
-      "korean": "~을 생각해내다"
+      "korean": "~을 생각해내다",
+      "partOfSpeech": "phrasal verb"
     }
   ]
 }

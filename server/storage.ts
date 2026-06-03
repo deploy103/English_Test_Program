@@ -30,6 +30,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_COMPLETED_RESULT_AGE_DAYS = 366;
 const MAX_WORDS_PER_BOOK = 5000;
 const MAX_WORD_CELL_LENGTH = 200;
+const MAX_WORD_PART_OF_SPEECH_LENGTH = 40;
 const DEFAULT_TEST_WRITING_SECONDS = 3;
 export const MAX_JSON_UPLOAD_MEGABYTES = 5;
 export const MAX_JSON_UPLOAD_BYTES = MAX_JSON_UPLOAD_MEGABYTES * 1024 * 1024;
@@ -171,13 +172,20 @@ export function normalizeWords(raw: unknown): WordEntry[] {
 
     const english = normalizeCell(lower.get("english") ?? lower.get("en"));
     const korean = normalizeCell(lower.get("korean") ?? lower.get("ko"));
+    const partOfSpeech = normalizePartOfSpeech(
+      lower.get("partofspeech")
+        ?? lower.get("part_of_speech")
+        ?? lower.get("part-of-speech")
+        ?? lower.get("pos")
+        ?? lower.get("품사")
+    );
 
     if (english.length > MAX_WORD_CELL_LENGTH || korean.length > MAX_WORD_CELL_LENGTH) {
       badRequest(`단어와 뜻은 각각 ${MAX_WORD_CELL_LENGTH}자 이하로 입력하세요.`);
     }
 
     if (english && korean) {
-      words.push({ english, korean });
+      words.push(partOfSpeech ? { english, korean, partOfSpeech } : { english, korean });
       if (words.length > MAX_WORDS_PER_BOOK) {
         badRequest(`단어장은 최대 ${MAX_WORDS_PER_BOOK}개 단어까지만 저장할 수 있습니다.`);
       }
@@ -1226,6 +1234,17 @@ function normalizeCell(value: unknown): string {
     return "";
   }
   return String(value).trim();
+}
+
+function normalizePartOfSpeech(value: unknown): string | undefined {
+  const partOfSpeech = normalizeCell(value);
+  if (!partOfSpeech) {
+    return undefined;
+  }
+  if (partOfSpeech.length > MAX_WORD_PART_OF_SPEECH_LENGTH) {
+    badRequest(`품사는 ${MAX_WORD_PART_OF_SPEECH_LENGTH}자 이하로 입력하세요.`);
+  }
+  return partOfSpeech;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
