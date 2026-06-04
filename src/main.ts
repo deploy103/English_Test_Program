@@ -595,7 +595,15 @@ function renderSidebar(): string {
         ${currentUser?.role === "admin" ? renderNavButton("admin", "관리자") : ""}
       </nav>
 
-      <section class="side-section">
+      <section class="side-section account-section">
+        <div class="side-heading">
+          <span>${escapeHtml(currentUser?.loginId ?? "")}</span>
+          <span>${groups.length} groups</span>
+        </div>
+        <button class="ghost-button" id="logout-button" type="button">로그아웃</button>
+      </section>
+
+      <section class="side-section wordbook-section">
         <div class="side-heading">
           <span>그룹별 단어장</span>
           <span>${totalWords()} words</span>
@@ -603,14 +611,6 @@ function renderSidebar(): string {
         <div class="side-list">
           ${wordbooks.length ? groupedWordbooks().map(renderSidebarGroup).join("") : `<div class="empty-note">단어장이 없습니다.</div>`}
         </div>
-      </section>
-
-      <section class="side-section account-section">
-        <div class="side-heading">
-          <span>${escapeHtml(currentUser?.loginId ?? "")}</span>
-          <span>${groups.length} groups</span>
-        </div>
-        <button class="ghost-button" id="logout-button" type="button">로그아웃</button>
       </section>
     </aside>
   `;
