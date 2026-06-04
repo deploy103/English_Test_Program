@@ -531,6 +531,10 @@ export async function startTest(input: StartTestInput): Promise<TestResult> {
 
 export async function markResultComplete(id: string, ownerId: string, submissions: AnswerSubmission[] = []): Promise<TestResult> {
   const result = await getResult(id, ownerId);
+  if (result.completedAt) {
+    return result;
+  }
+
   if (result.answerInputEnabled) {
     applyAnswerSubmissions(result, submissions);
   }
