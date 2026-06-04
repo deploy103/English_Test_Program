@@ -2800,12 +2800,13 @@ textarea:focus {
 }
 
 @media (max-width: 700px) {
-  .answer-card-list {
+  .answer-detail .answer-card-list {
     display: grid;
     gap: 8px;
   }
 
-  .answer-table-wrap {
+  .answer-detail .answer-table-wrap,
+  .wordbook-table-wrap {
     display: none;
   }
 
