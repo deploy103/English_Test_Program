@@ -146,7 +146,6 @@ interface StatsRangeDraft {
 
 interface LoginDraft {
   identifier: string;
-  password: string;
   rememberMe: boolean;
 }
 
@@ -154,7 +153,6 @@ interface RegisterDraft {
   email: string;
   loginId: string;
   name: string;
-  password: string;
 }
 
 interface TestSettingsDraft {
@@ -515,7 +513,7 @@ function renderLoginForm(): string {
       </label>
       <label class="field">
         <span>비밀번호</span>
-        <input name="password" type="password" autocomplete="current-password" value="${escapeAttribute(loginDraft.password)}" required />
+        <input name="password" type="password" autocomplete="current-password" required />
       </label>
       <label class="checkbox-field">
         <input name="rememberMe" type="checkbox" value="1" ${loginDraft.rememberMe ? "checked" : ""} />
@@ -543,7 +541,7 @@ function renderRegisterForm(): string {
       </label>
       <label class="field">
         <span>비밀번호</span>
-        <input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" value="${escapeAttribute(registerDraft.password)}" required />
+        <input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
       </label>
       <p class="auth-hint">비밀번호는 8자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.</p>
       <button class="primary-button" type="submit" ${isBusy ? "disabled" : ""}>${isBusy ? "생성 중..." : "회원가입"}</button>
@@ -597,14 +595,6 @@ function renderSidebar(): string {
         ${currentUser?.role === "admin" ? renderNavButton("admin", "관리자") : ""}
       </nav>
 
-      <section class="side-section account-section">
-        <div class="side-heading">
-          <span>${escapeHtml(currentUser?.loginId ?? "")}</span>
-          <span>${groups.length} groups</span>
-        </div>
-        <button class="ghost-button" id="logout-button" type="button">로그아웃</button>
-      </section>
-
       <section class="side-section">
         <div class="side-heading">
           <span>그룹별 단어장</span>
@@ -613,6 +603,14 @@ function renderSidebar(): string {
         <div class="side-list">
           ${wordbooks.length ? groupedWordbooks().map(renderSidebarGroup).join("") : `<div class="empty-note">단어장이 없습니다.</div>`}
         </div>
+      </section>
+
+      <section class="side-section account-section">
+        <div class="side-heading">
+          <span>${escapeHtml(currentUser?.loginId ?? "")}</span>
+          <span>${groups.length} groups</span>
+        </div>
+        <button class="ghost-button" id="logout-button" type="button">로그아웃</button>
       </section>
     </aside>
   `;
@@ -2422,11 +2420,6 @@ function bindAuthEvents(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-auth-mode]").forEach((button) => {
     button.addEventListener("click", () => {
       authMode = button.dataset.authMode === "register" ? "register" : "login";
-      if (authMode === "register") {
-        loginDraft.password = "";
-      } else {
-        registerDraft.password = "";
-      }
       clearToast();
       render();
     });
@@ -2477,7 +2470,6 @@ async function loadAuthState(): Promise<void> {
 async function login(formData: FormData): Promise<void> {
   loginDraft = {
     identifier: String(formData.get("identifier") ?? ""),
-    password: String(formData.get("password") ?? ""),
     rememberMe: formData.get("rememberMe") === "1"
   };
   await withBusy(async () => {
@@ -2499,8 +2491,7 @@ async function register(formData: FormData): Promise<void> {
   registerDraft = {
     email: String(formData.get("email") ?? ""),
     loginId: String(formData.get("loginId") ?? ""),
-    name: String(formData.get("name") ?? ""),
-    password: String(formData.get("password") ?? "")
+    name: String(formData.get("name") ?? "")
   };
   await withBusy(async () => {
     const auth = await api<AuthResponse>("/api/auth/register", {
@@ -4052,7 +4043,6 @@ function syncLoginDraftFromForm(form: HTMLFormElement): void {
   const formData = new FormData(form);
   loginDraft = {
     identifier: String(formData.get("identifier") ?? ""),
-    password: String(formData.get("password") ?? ""),
     rememberMe: formData.get("rememberMe") === "1"
   };
 }
@@ -4062,15 +4052,13 @@ function syncRegisterDraftFromForm(form: HTMLFormElement): void {
   registerDraft = {
     email: String(formData.get("email") ?? ""),
     loginId: String(formData.get("loginId") ?? ""),
-    name: String(formData.get("name") ?? ""),
-    password: String(formData.get("password") ?? "")
+    name: String(formData.get("name") ?? "")
   };
 }
 
 function defaultLoginDraft(): LoginDraft {
   return {
     identifier: "",
-    password: "",
     rememberMe: false
   };
 }
@@ -4079,8 +4067,7 @@ function defaultRegisterDraft(): RegisterDraft {
   return {
     email: "",
     loginId: "",
-    name: "",
-    password: ""
+    name: ""
   };
 }
 
