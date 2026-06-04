@@ -4459,7 +4459,7 @@ async function speakEnglishWord(value: string): Promise<void> {
   } else {
     utterance.lang = "en-US";
   }
-  utterance.rate = 0.72;
+  utterance.rate = 0.68;
   utterance.pitch = 1;
   utterance.volume = 1;
   window.speechSynthesis.speak(utterance);
@@ -4483,7 +4483,7 @@ async function resolveEnglishSpeechVoice(): Promise<SpeechSynthesisVoice | null>
     };
 
     window.speechSynthesis.addEventListener("voiceschanged", finish);
-    window.setTimeout(finish, 250);
+    window.setTimeout(finish, 500);
   });
 }
 
@@ -4500,6 +4500,14 @@ function selectEnglishSpeechVoice(): SpeechSynthesisVoice | null {
   }
 
   const preferredKeywordSets = [
+    ["natural", "en-us"],
+    ["neural", "en-us"],
+    ["enhanced", "en-us"],
+    ["premium", "en-us"],
+    ["natural"],
+    ["neural"],
+    ["enhanced"],
+    ["premium"],
     ["microsoft", "aria"],
     ["microsoft", "jenny"],
     ["microsoft", "guy"],
