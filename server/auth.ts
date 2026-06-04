@@ -13,6 +13,8 @@ import type {
 } from "./types.js";
 
 const SESSION_COOKIE = "wt_session";
+const SESSION_ID_PATTERN = /^[a-f0-9-]{36}$/i;
+const SESSION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const REMEMBER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_LOGIN_FAILURES = 10;
@@ -655,8 +657,13 @@ function parseSessionCookie(cookieHeader: string | undefined): { sessionId: stri
     return null;
   }
 
-  const [sessionId, token] = value.split(".");
-  if (!sessionId || !token || !/^[a-f0-9-]{36}$/i.test(sessionId)) {
+  const parts = value.split(".");
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const [sessionId, token] = parts;
+  if (!SESSION_ID_PATTERN.test(sessionId) || !SESSION_TOKEN_PATTERN.test(token)) {
     return null;
   }
   return { sessionId, token };
@@ -742,7 +749,7 @@ function sessionPath(id: string): string {
 }
 
 function assertSafeId(id: string): void {
-  if (!/^[a-f0-9-]{36}$/i.test(id)) {
+  if (!SESSION_ID_PATTERN.test(id)) {
     throw new HttpError(404, "항목을 찾을 수 없습니다.");
   }
 }

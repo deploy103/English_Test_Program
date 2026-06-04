@@ -300,7 +300,9 @@ a {
   display: flex;
   width: min(330px, calc(100vw - 34px));
   max-width: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   flex-direction: column;
   gap: 22px;
   padding: 24px;
@@ -338,6 +340,7 @@ a {
 
 .brand {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 12px;
 }
@@ -418,6 +421,7 @@ a {
 
 .nav-tabs {
   display: grid;
+  flex: 0 0 auto;
   gap: 8px;
 }
 
@@ -603,7 +607,14 @@ a {
 }
 
 .side-section {
+  flex: 0 0 auto;
   min-height: 0;
+}
+
+.sidebar > .side-section:not(.account-section) {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .sidebar .side-section {
@@ -638,6 +649,12 @@ a {
 .answer-list {
   display: grid;
   gap: 8px;
+}
+
+.sidebar > .side-section:not(.account-section) .side-list {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .side-group {
@@ -1354,6 +1371,7 @@ a {
 
 .account-section {
   display: grid;
+  flex: 0 0 auto;
   gap: 8px;
   padding-top: 12px;
   border-top: 1px solid #edf1f3;
@@ -2706,6 +2724,32 @@ textarea:focus {
 }
 
 @media (max-width: 560px) {
+  .sidebar {
+    width: min(320px, calc(100vw - 20px));
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .nav-tabs {
+    gap: 6px;
+  }
+
+  .nav-button {
+    min-height: 44px;
+    gap: 8px;
+    padding: 6px 28px 6px 8px;
+    font-size: 13px;
+  }
+
+  .nav-icon {
+    width: 30px;
+    height: 30px;
+  }
+
+  .account-section {
+    padding: 12px;
+  }
+
   .app-bar {
     position: static;
     grid-template-columns: 44px minmax(0, 1fr) auto;
@@ -2718,6 +2762,10 @@ textarea:focus {
   .compact-logout-button {
     min-width: 52px;
     padding: 0 10px;
+  }
+
+  .compact-logout-button {
+    display: none;
   }
 
   .compact-settings-button {
