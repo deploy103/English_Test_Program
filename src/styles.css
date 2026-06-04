@@ -184,6 +184,7 @@ a {
 [data-theme="dark"] .auth-brand h1,
 [data-theme="dark"] .page-header h2,
 [data-theme="dark"] .panel h3,
+[data-theme="dark"] .session-card strong,
 [data-theme="dark"] .item-title,
 [data-theme="dark"] .profile-list dd,
 [data-theme="dark"] .manage-item h3,
@@ -611,10 +612,9 @@ a {
   min-height: 0;
 }
 
-.sidebar > .side-section:not(.account-section) {
+.wordbook-section {
   display: grid;
-  flex: 1 1 auto;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
 }
 
 .sidebar .side-section {
@@ -649,12 +649,6 @@ a {
 .answer-list {
   display: grid;
   gap: 8px;
-}
-
-.sidebar > .side-section:not(.account-section) .side-list {
-  min-height: 0;
-  overflow: auto;
-  padding-right: 2px;
 }
 
 .side-group {
@@ -1708,6 +1702,20 @@ textarea:focus {
   box-shadow: 0 8px 18px rgba(16, 185, 129, 0.14);
 }
 
+[data-theme="dark"] .segment span {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.72);
+  color: #dbeafe;
+}
+
+[data-theme="dark"] .segment input:checked + span {
+  border-color: rgba(52, 211, 153, 0.52);
+  background:
+    linear-gradient(135deg, rgba(16, 185, 129, 0.24), rgba(37, 99, 235, 0.22));
+  color: #ecfdf5;
+  box-shadow: 0 10px 22px rgba(16, 185, 129, 0.18);
+}
+
 .segment span:hover {
   transform: translateY(-1px);
 }
@@ -1764,6 +1772,12 @@ textarea:focus {
 .danger-button:hover {
   border-color: #ef7b7b;
   background: #ffe4e6;
+}
+
+[data-theme="dark"] .danger-button:hover {
+  border-color: rgba(248, 113, 113, 0.58);
+  background: rgba(127, 29, 29, 0.52);
+  color: #fee2e2;
 }
 
 .manage-summary,
