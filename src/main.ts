@@ -3286,7 +3286,9 @@ function showAnswerFeedback(index: number): void {
   activeTest.phase = "feedback";
   activeTest.remainingMs = TEST_FEEDBACK_MS;
   if (activeTest.result.answerInputEnabled) {
-    updateActiveTestFrame();
+    if (!updateActiveTestFrame()) {
+      render();
+    }
     focusAnswerInputIfNeeded();
   } else {
     blurActiveControl();
