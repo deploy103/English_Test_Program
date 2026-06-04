@@ -17,10 +17,13 @@ const SESSION_ID_PATTERN = /^[a-f0-9-]{36}$/i;
 const SESSION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const REMEMBER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_LOGIN_IDENTIFIER_LENGTH = 254;
+const MAX_LOGIN_PASSWORD_LENGTH = 128;
 const MAX_LOGIN_FAILURES = 10;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
 const MAX_AUDIT_LINES = 300;
 const MAX_AUDIT_FILE_LINES = 5000;
+const DUMMY_PASSWORD_SALT = "codex_dummy_login_salt_v1";
 const PASSWORD_PARAMS: PasswordParams = {
   algorithm: "scrypt",
   keyLength: 64,
@@ -151,14 +154,20 @@ export async function registerUser(input: RegisterUserInput, meta: AuthRequestMe
 export async function loginUser(input: LoginInput, meta: AuthRequestMeta): Promise<{ user: UserRecord; session: IssuedSession }> {
   return withUserWriteLock(async () => {
     const identifier = input.identifier.trim();
-    if (!identifier || !input.password) {
+    if (
+      !identifier ||
+      !input.password ||
+      identifier.length > MAX_LOGIN_IDENTIFIER_LENGTH ||
+      input.password.length > MAX_LOGIN_PASSWORD_LENGTH
+    ) {
+      await delayInvalidLogin();
       throwInvalidCredentials(meta);
     }
 
     const users = await readRecords<UserRecord>(USER_DIR);
     const user = findUserByIdentifier(users, identifier);
     if (!user) {
-      await delayInvalidLogin();
+      await delayInvalidLogin(input.password);
       await appendAuditLog({
         event: "auth.login",
         result: "failure",
@@ -257,7 +266,7 @@ export async function rotateCsrfToken(session: SessionRecord): Promise<string> {
 }
 
 export function verifyCsrfToken(session: SessionRecord, token: string | undefined): boolean {
-  if (!token) {
+  if (!token || !SESSION_TOKEN_PATTERN.test(token)) {
     return false;
   }
   return timingSafeEqual(hashToken(token), session.csrfTokenHash);
@@ -811,8 +820,12 @@ function truncateText(value: string | undefined, max = 200): string | undefined 
   return value.length > max ? value.slice(0, max) : value;
 }
 
-function delayInvalidLogin(): Promise<void> {
-  return new Promise((resolve) => {
+async function delayInvalidLogin(password?: string): Promise<void> {
+  if (password && password.length <= MAX_LOGIN_PASSWORD_LENGTH) {
+    await deriveScrypt(password, DUMMY_PASSWORD_SALT, PASSWORD_PARAMS).catch(() => undefined);
+    return;
+  }
+  await new Promise((resolve) => {
     setTimeout(resolve, 250);
   });
 }

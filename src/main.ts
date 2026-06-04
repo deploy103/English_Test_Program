@@ -1553,6 +1553,19 @@ function renderWordbookVocabularyTable(words: WordEntry[]): string {
         </tbody>
       </table>
     </div>
+    <div class="wordbook-card-list">
+      ${words.map((word, index) => `
+        <article class="wordbook-card">
+          <div class="wordbook-card-index">${index + 1}</div>
+          <div class="wordbook-card-body">
+            <strong>${escapeHtml(word.english)}</strong>
+            <span>${escapeHtml(word.korean)}</span>
+            <small>${word.partOfSpeech ? escapeHtml(word.partOfSpeech) : "품사 없음"}</small>
+          </div>
+          <button class="ghost-button mini-button speak-button" data-speak-word="${escapeAttribute(word.english)}" type="button">듣기</button>
+        </article>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -3389,7 +3402,7 @@ function normalizeAnswerForCompare(value: string): string {
     .toLocaleLowerCase("ko-KR");
 }
 
-async function finishActiveTest(): Promise<void> {
+async function finishActiveTest(retryCount = 0): Promise<void> {
   if (!activeTest) {
     return;
   }
@@ -3401,21 +3414,36 @@ async function finishActiveTest(): Promise<void> {
   const completionBody = activeTest.result.answerInputEnabled
     ? JSON.stringify({ answers: activeTest.responses })
     : undefined;
-  const completed = await api<TestResult>(`/api/results/${activeTest.result.id}/complete`, {
-    method: "PATCH",
-    ...(completionBody
-      ? {
-        headers: { "Content-Type": "application/json" },
-        body: completionBody
-      }
-      : {})
-  });
-  selectedResult = completed;
-  selectedResultId = completed.id;
-  activeTest = null;
-  showToast("학습 기록을 저장했습니다.");
-  await refreshAll();
-  navigateToAnswerDetail(completed.id, true);
+  try {
+    const completed = await api<TestResult>(`/api/results/${activeTest.result.id}/complete`, {
+      method: "PATCH",
+      ...(completionBody
+        ? {
+          headers: { "Content-Type": "application/json" },
+          body: completionBody
+        }
+        : {})
+    });
+    selectedResult = completed;
+    selectedResultId = completed.id;
+    activeTest = null;
+    showToast("학습 기록을 저장했습니다.");
+    await refreshAll();
+    navigateToAnswerDetail(completed.id, true);
+  } catch (error) {
+    if (retryCount < 2 && activeTest?.phase === "done") {
+      showToast("학습 기록 저장을 다시 시도합니다.");
+      window.setTimeout(() => {
+        void finishActiveTest(retryCount + 1);
+      }, 1200);
+      return;
+    }
+
+    activeTest = null;
+    showToast(error instanceof Error ? error.message : "학습 기록을 저장하지 못했습니다.");
+    await refreshAll().catch(() => undefined);
+    navigateToTab("test", true);
+  }
 }
 
 async function abortActiveTest(nextTab: TabKey = "test", replace = true): Promise<void> {
